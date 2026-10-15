@@ -1,0 +1,45 @@
+# Build output
+bin/
+obj/
+artifacts/
+feed/
+publish/
+dist/
+[Dd]ebug/
+[Rr]elease/
+TestResults/
+*.nupkg
+*.snupkg
+
+# Visual Studio, Rider, VS Code
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+*.userprefs
+*.DotSettings.user
+*.rsuser
+*.cache
+_ReSharper*/
+*.log
+
+# Local tooling
+.playwright-mcp/
+.claude/settings.local.json
+.claude/worktrees/
+
+# Secrets and local settings. The app keeps its own data in %AppData%/Seneschal, but if a copy ever lands in the repo it must not be committed
+.env
+.env.*
+*.pfx
+*.snk
+mcp-secret.txt
+assistant.json
+assistant-history.json
+token.json
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store

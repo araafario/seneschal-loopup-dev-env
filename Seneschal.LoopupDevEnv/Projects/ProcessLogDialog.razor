@@ -1,0 +1,69 @@
+@using DevEnvironment.Logs
+@using DevEnvironment.Projects.Commands
+@using DevEnvironment.Projects.Docker
+@implements IDisposable
+@inject ProjectRunner Runner
+@inject DockerRunner Docker
+@inject CommandRunner Commands
+
+<MudDialog ContentClass="log-dialog-content">
+    <DialogContent>
+        @* The state sits in the body: MudBlazor draws a dialog's title outside this component, so a title would not follow the state *@
+        <div class="@($"log-dialog-state-row {StateClass}")" id="process-log-title">
+            <span class="run-dot" aria-hidden="true"></span>
+            <span id="process-log-state">@StateText</span>
+        </div>
+        <div class="log-dialog-body">
+            <LogPane SourceId="@SourceId" />
+        </div>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    /// <summary>The log to show: project:&lt;id&gt;, command:&lt;id&gt; or docker:&lt;name&gt;, as the log sources name them.</summary>
+    [Parameter, EditorRequired] public string SourceId { get; set; } = "";
+
+    private bool IsDocker => SourceId.StartsWith("docker:", StringComparison.Ordinal);
+
+    private bool IsCommand => SourceId.StartsWith("command:", StringComparison.Ordinal);
+
+    private string Key => SourceId[(SourceId.IndexOf(':') + 1)..];
+
+    /// <summary>What is being asked about: a .NET project, a command (microfrontend) or a container. They all report the same kind of state.</summary>
+    private RunInfo? Run => IsDocker ? null : IsCommand ? Commands.Get(Key) : Runner.Get(Key);
+
+    private string StateClass
+    {
+        get
+        {
+            if (Run is { } run) return $"run-{run.Status.ToString().ToLowerInvariant()}";
+            return Docker.Get(Key)?.RunClass(Docker.Busy(Key)) ?? "run-stopped";
+        }
+    }
+
+    private string StateText
+    {
+        get
+        {
+            if (Run is { } run) return run.Text;
+            if (Docker.Busy(Key) is { } busy) return busy;
+            return Docker.Get(Key)?.Status ?? "Not found in Docker";
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        Runner.Changed += OnChanged;
+        Commands.Changed += OnChanged;
+        Docker.Changed += OnChanged;
+    }
+
+    public void Dispose()
+    {
+        Runner.Changed -= OnChanged;
+        Commands.Changed -= OnChanged;
+        Docker.Changed -= OnChanged;
+    }
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+}

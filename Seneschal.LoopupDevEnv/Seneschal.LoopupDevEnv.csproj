@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <!-- A Seneschal extension, built from the SDK package alone: the package brings the types and the build rules that stage the
+       extension and pack it as artifacts/packages/loopup-dev-env.snx, the file to import in the Extension Manager.
+       Three tools that share code: Projects, Logs and the Token Generator. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Seneschal.LoopupDevEnv</AssemblyName>
+    <RootNamespace>DevEnvironment</RootNamespace>
+    <ExtensionId>loopup-dev-env</ExtensionId>
+    <UserSecretsId>c8849455-bea4-46d2-abc0-b945d75a6e13</UserSecretsId>
+    <!-- The one place the SDK version is chosen. It must not be newer than the Seneschal that imports the extension -->
+    <SeneschalSdkVersion>1.2.0</SeneschalSdkVersion>
+    <MudBlazorVersion>9.11.0</MudBlazorVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Seneschal.Sdk" Version="$(SeneschalSdkVersion)" />
+    <!-- Compiled against, never shipped: the app provides MudBlazor -->
+    <PackageReference Include="MudBlazor" Version="$(MudBlazorVersion)" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+</Project>

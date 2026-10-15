@@ -1,0 +1,210 @@
+/* Styles of the Dev Environment extension (Projects and Logs). They use the app's theme variables: --fg, --border, --hover, --accent, --card, --card-border, --field. */
+
+/* ---- Projects (runner) ---- */
+.run-toolbar { display: flex; align-items: center; gap: var(--gap-2); flex-wrap: wrap; margin-bottom: var(--gap-2); }
+.run-bulk { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.run-bulk .mud-input-control { margin: 0; }
+.run-search { max-width: 280px; }
+.run-list { display: flex; flex-direction: column; gap: 4px; }
+.run-row { box-shadow: var(--card-shadow); display: flex; align-items: center; gap: var(--gap-2); padding: 6px 12px 6px 2px; background: var(--card); border: 1px solid var(--card-border); border-radius: 6px; }
+.run-check { flex: none; margin: 0 !important; }
+.run-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: rgba(150,150,150,.6); }
+.run-running .run-dot { background: #4caf50; }
+.run-starting .run-dot { background: #ffb300; animation: run-pulse 1s ease-in-out infinite; }
+.run-exited .run-dot { background: #f44336; }
+.run-external .run-dot { background: #29b6f6; }
+@keyframes run-pulse { 50% { opacity: .35; } }
+.run-main { flex: 1; min-width: 0; }
+.run-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.run-name { font-weight: 600; font-size: var(--fs-row); margin-right: 4px; }
+.run-badge { display: inline-block; padding: 0 7px; line-height: 18px; font-size: var(--fs-small); font-weight: 500; border: 1px solid var(--border); border-radius: 999px; opacity: .85; white-space: nowrap; }
+.run-badge-bad { border-color: #f44336; color: #f44336; opacity: 1; }
+.run-sub { display: flex; gap: var(--gap-3); flex-wrap: wrap; font-size: var(--fs-small); margin-top: 1px; }
+.run-url { color: var(--accent); text-decoration: none; }
+.run-url:hover { text-decoration: underline; }
+.run-url-off { opacity: .6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-state { flex: none; width: 140px; font-size: var(--fs-small); opacity: .8; text-align: right; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-state-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-state-error { opacity: 1; display: flex; justify-content: flex-end; align-items: center; gap: 4px; }
+.run-state-error .mud-button-root { min-width: 0; padding: 0 8px; height: 26px; min-height: 26px; font-size: var(--fs-small); }
+.run-actions { flex: none; display: flex; align-items: center; gap: 2px; }
+
+/* Add projects and folder browser dialogs (rendered outside the layout, so they use MudBlazor's palette variables) */
+.add-path { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.add-input { flex: 1; }
+.add-list { max-height: 340px; overflow-y: auto; margin-top: 8px; }
+.add-item { display: flex; align-items: center; gap: 4px; padding: 1px 4px; border-radius: 4px; cursor: pointer; }
+.add-item:hover { background: var(--mud-palette-action-default-hover); }
+.add-item.is-added { opacity: .55; cursor: default; }
+.add-text { min-width: 0; }
+.fb-path { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.fb-input { flex: 1; }
+.fb-list { height: 320px; overflow-y: auto; border: 1px solid var(--mud-palette-lines-default); border-radius: 6px; }
+.fb-item { display: flex; align-items: center; justify-content: flex-start; gap: var(--gap-2); width: 100%; padding: 4px 10px; font-size: var(--fs-body); background: transparent; color: inherit; border: 0; text-align: left; cursor: pointer; font: inherit; }
+.fb-item:hover { background: var(--mud-palette-action-default-hover); }
+
+/* ---- Log viewer ---- */
+.log-toolbar { display: flex; align-items: center; gap: var(--gap-2); margin-bottom: var(--gap-2); flex-wrap: wrap; }
+.log-toolbar-sep { align-self: stretch; width: 1px; margin: 4px 2px; background: var(--border); }
+.log-layout-btn .mud-icon-root { fill: currentColor; }
+.log-toolbar-hint { font-size: var(--fs-small); opacity: .75; }
+.log-layouts { display: flex; gap: 4px; }
+.log-layout-btn { display: flex; padding: 4px; background: transparent; color: var(--fg); border: 1px solid transparent; border-radius: 4px; cursor: pointer; }
+.log-layout-btn:hover { background: var(--hover); }
+.log-layout-btn.picked { border-color: var(--accent); color: var(--accent); }
+/* Fills what is left of the window below the title bar and toolbar, and follows the window as it is resized.
+   Each pane scrolls inside itself; the page only scrolls when the window is smaller than the minimum. */
+.log-grid { display: grid; gap: var(--gap-2); height: max(220px, calc(100vh - 165px)); }
+.log-single { grid-template: minmax(0, 1fr) / minmax(0, 1fr); }
+.log-cols2 { grid-template: minmax(0, 1fr) / repeat(2, minmax(0, 1fr)); }
+.log-cols3 { grid-template: minmax(0, 1fr) / repeat(3, minmax(0, 1fr)); }
+.log-cols4 { grid-template: minmax(0, 1fr) / repeat(4, minmax(0, 1fr)); }
+.log-rows2 { grid-template: repeat(2, minmax(0, 1fr)) / minmax(0, 1fr); }
+.log-rows3 { grid-template: repeat(3, minmax(0, 1fr)) / minmax(0, 1fr); }
+.log-rows4 { grid-template: repeat(4, minmax(0, 1fr)) / minmax(0, 1fr); }
+.log-grid2x2 { grid-template: repeat(2, minmax(0, 1fr)) / repeat(2, minmax(0, 1fr)); }
+.log-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--terminal); overflow: hidden; }
+.log-pane-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 4px; border-bottom: 1px solid var(--border); }
+.log-select, .log-filter { height: var(--h-ctl-sm); padding: 0 8px; background: var(--field); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; font: inherit; font-size: var(--fs-small); min-width: 0; }
+.log-select { flex: 1 1 130px; min-width: 110px; }
+.log-filter-wrap { position: relative; display: flex; flex: 1 1 70px; min-width: 60px; }
+.log-filter { flex: 1; width: 100%; padding-right: 26px; }
+.log-filter-clear { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; background: transparent; color: var(--fg); border: 0; border-radius: 4px; cursor: pointer; opacity: .7; }
+.log-filter-clear:hover { opacity: 1; background: var(--hover); }
+.log-filter-clear .mud-icon-root { fill: currentColor; width: 16px; height: 16px; }
+.log-btn { flex: none; display: flex; align-items: center; justify-content: center; width: var(--h-ctl-sm); height: var(--h-ctl-sm); background: transparent; color: var(--fg); border: 1px solid transparent; border-radius: 4px; cursor: pointer; }
+.log-btn:hover { background: var(--hover); }
+.log-btn.on { border-color: var(--accent); color: var(--accent); }
+.log-btn .mud-icon-root { fill: currentColor; }
+.log-paused { padding: 3px 10px; font-size: .75rem; background: rgba(255,179,0,.18); }
+/* column-reverse keeps the view at the newest line, and stops following as soon as the user scrolls up */
+.log-scroll { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column-reverse; }
+/* margin-bottom:auto keeps a short log at the top; once it overflows there is no free space and the view sits at the newest line */
+.log-body { font-family: Consolas, "Cascadia Mono", "Courier New", monospace; font-size: 12px; line-height: 1.45; padding: 6px 10px; min-width: max-content; margin-bottom: auto; }
+.log-body.wrap { min-width: 0; }
+.log-body.wrap .log-line { white-space: pre-wrap; word-break: break-word; }
+.log-line { white-space: pre; min-height: 1.45em; }
+.ll-error { color: #ff6b6b; }
+.ll-warn { color: #ffc14d; }
+.app-light .ll-error { color: #c62828; }
+.app-light .ll-warn { color: #a05a00; }
+.ll-dim { opacity: .6; }
+.log-empty { opacity: .6; font-family: inherit; white-space: normal; }
+
+/* Sections of the Projects page (Docker, Services): a header with a title, a short summary and actions on the right */
+.run-section { margin-bottom: var(--gap-4); }
+.run-section-head { position: relative; display: flex; align-items: center; gap: var(--gap-2); flex-wrap: wrap; margin-bottom: var(--gap-2); padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+.run-section-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 2px; background: transparent; color: var(--fg); border: 0; border-radius: 4px; font: inherit; cursor: pointer; }
+.run-section-toggle:hover { background: var(--hover); }
+.run-section-toggle .mud-icon-root { fill: currentColor; }
+.run-section-title { font-size: var(--fs-section); font-weight: 600; }
+.run-section-title-plain { padding-left: 2px; }
+.run-section-meta { font-size: var(--fs-small); opacity: .7; }
+.run-section-alert { margin-bottom: 8px; }
+.run-group-name { font-size: .75rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; opacity: .7; }
+.run-group-count { font-size: .75rem; opacity: .55; }
+.add-list-tall { max-height: 420px; }
+.add-group-head { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; padding: 0 4px; }
+.add-group-head:first-child { margin-top: 0; }
+
+/* The log window of a single project or container: one big terminal, with the running state in the title */
+.log-dialog-state-row { display: flex; align-items: center; gap: var(--gap-2); margin-bottom: var(--gap-2); font-size: var(--fs-small); }
+.log-dialog-state-row span:last-child { opacity: .8; }
+.mud-dialog .log-dialog-content { padding: 4px 20px 16px; }
+.log-dialog-body { display: flex; height: calc(100vh - 200px); min-height: 320px; }
+.log-dialog-body > .log-pane { flex: 1; min-width: 0; }
+
+/* Loading: a thin bar that sits on the header's bottom line, and placeholder rows that match the real ones */
+.run-section-progress.mud-progress-linear { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; }
+.run-skeleton { padding-left: 64px; }
+.run-skeleton .mud-skeleton { transform: none; }
+
+/* Microfrontends: the root config stands out, and the command that starts a row is shown small beside its port */
+.run-badge-root { border-color: var(--accent); color: var(--accent); opacity: 1; }
+.run-cmd { font-family: Consolas, "Cascadia Mono", "Courier New", monospace; font-size: .75rem; opacity: .6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Smart Startup: a row per startup, the steps below it, and a dot per item that follows its progress */
+.startup-expand.mud-icon-button { width: 30px; height: 30px; padding: 4px; margin: 0 4px 0 6px; color: var(--fg); }
+.startup-detail { margin: -2px 0 6px 64px; padding: 6px 12px; border-left: 2px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
+.startup-step-row { display: flex; gap: var(--gap-3); align-items: flex-start; }
+.startup-step-no { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--border); font-size: .75rem; font-weight: 600; }
+.startup-step-main { flex: 1; min-width: 0; }
+.startup-step-note { font-size: var(--fs-small); line-height: 22px; opacity: .75; margin-bottom: 4px; }
+.startup-items { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.startup-item { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px 0 6px; font-size: var(--fs-small); border: 1px solid var(--border); border-radius: 999px; }
+.startup-item-dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(150,150,150,.6); }
+.item-starting .startup-item-dot { background: #ffb300; animation: run-pulse 1s ease-in-out infinite; }
+.item-ready .startup-item-dot, .item-alreadyrunning .startup-item-dot { background: #4caf50; }
+.item-failed { border-color: #f44336; }
+.item-failed .startup-item-dot { background: #f44336; }
+
+/* Dragging the rows of a section into a new order */
+.run-section [data-sort-id][draggable=true] { cursor: grab; }
+.run-section [data-sort-id].is-dragging { opacity: .4; }
+.run-section [data-sort-id].drop-before { box-shadow: 0 -3px 0 0 var(--accent); }
+.run-section [data-sort-id].drop-after { box-shadow: 0 3px 0 0 var(--accent); }
+.run-section [data-sort-id] button, .run-section [data-sort-id] a, .run-section [data-sort-id] .mud-checkbox { cursor: pointer; }
+
+/* The grip: the usual sign that a card can be moved. Faint until the card is hovered, strong on the grip itself */
+.run-grip { flex: none; display: flex; align-items: center; margin-left: 4px; margin-right: -4px; opacity: .28; cursor: grab; transition: opacity .15s; }
+.run-grip .mud-icon-root { fill: currentColor; font-size: 1.15rem; }
+.run-row:hover .run-grip { opacity: .65; }
+.run-grip:hover { opacity: 1; }
+
+/* The step editor: a card per step with a header, then labelled rows */
+.startup-steps-head { display: flex; align-items: baseline; gap: var(--gap-3); margin: var(--gap-3) 0 4px; }
+.startup-steps-head .ne-section { margin-bottom: 0; }
+.startup-steps-hint { font-size: .75rem; opacity: .6; }
+.startup-step-card { box-shadow: var(--card-shadow); margin-top: var(--gap-2); border: 1px solid var(--card-border); border-radius: 6px; background: var(--card); overflow: hidden; }
+.startup-step-head { display: flex; align-items: center; gap: var(--gap-3); padding: 8px 8px 8px 12px; border-bottom: 1px solid var(--border); }
+.startup-badge-no { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-weight: 700; font-size: .8125rem; }
+.startup-step-titles { flex: 1; min-width: 0; }
+.startup-step-title { font-weight: 600; font-size: var(--fs-row); line-height: 1.2; }
+.startup-step-sub { font-size: .75rem; opacity: .7; margin-top: 2px; }
+.startup-step-tools { flex: none; display: flex; gap: 2px; }
+.startup-step-tools .mud-icon-button { color: var(--fg); }
+.startup-edit-body { display: grid; grid-template-columns: 64px 1fr; column-gap: var(--gap-3); row-gap: var(--gap-2); align-items: center; padding: var(--gap-3); }
+.startup-field-label { font-size: .75rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; opacity: .6; }
+.startup-seg { display: inline-flex; justify-self: start; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+.startup-seg-btn { padding: 4px 12px; background: transparent; color: var(--fg); border: 0; font: inherit; font-size: var(--fs-small); cursor: pointer; }
+.startup-seg-btn + .startup-seg-btn { border-left: 1px solid var(--border); }
+.startup-seg-btn:hover { background: var(--hover); }
+.startup-seg-btn.on { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.startup-items-edit { min-height: 32px; }
+.startup-empty { font-size: .8125rem; opacity: .55; }
+.startup-limits { display: flex; align-items: center; gap: var(--gap-4); flex-wrap: wrap; }
+.startup-limits .mud-switch { margin: 0; }
+.startup-limits .mud-input-control { flex: none; width: 190px; }
+.startup-add-step { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; margin-top: var(--gap-2); padding: 6px; background: transparent; color: var(--fg); border: 1px dashed var(--border); border-radius: 6px; font: inherit; font-weight: 600; font-size: .875rem; cursor: pointer; }
+.startup-add-step:hover { background: var(--hover); border-color: var(--fg-dim); }
+.startup-add-step .mud-icon-root { fill: currentColor; }
+
+/* Select all is a small control: smaller than the body text so it does not outweigh the buttons beside it */
+.run-select-all.mud-input-control { margin: 0; }
+.run-select-all .mud-typography { font-size: var(--fs-small); }
+.run-select-all .mud-icon-root { font-size: 1.125rem; }
+
+.startup-step-note span + span { margin-left: 14px; opacity: .75; }
+
+/* Add instances: the two numbers, then one line per instance with the addresses it will get */
+.inst-fields { display: flex; gap: var(--gap-3); margin-bottom: var(--gap-3); }
+.inst-fields .mud-input-control { flex: 1; }
+.inst-preview { display: flex; flex-direction: column; border: 1px solid var(--card-border); border-radius: 6px; overflow: hidden; }
+.inst-row { display: flex; align-items: baseline; gap: var(--gap-3); padding: 6px 12px; background: var(--card); }
+.inst-row + .inst-row { border-top: 1px solid var(--border); }
+.inst-name { font-weight: 600; font-size: var(--fs-body); min-width: 0; flex: 1; }
+.inst-urls { display: flex; gap: var(--gap-3); flex-wrap: wrap; font-size: var(--fs-small); }
+
+
+/* Error details dialog: one card per failure */
+.err-list { display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto; }
+.err-card { border: 1px solid var(--border); border-left: 3px solid var(--bad, #f44336); border-radius: 6px; padding: 8px 12px; }
+.err-head { display: flex; align-items: center; gap: 8px; }
+.err-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad, #f44336); flex: none; }
+.err-title { flex: 1; min-width: 0; font-size: var(--fs-row); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.err-text { margin: 4px 0 0; padding: 8px 12px; border-radius: 4px; background: var(--terminal, rgba(0,0,0,.25)); font-family: Consolas, monospace; font-size: .8125rem; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow-y: auto; }
+.err-line { margin: 2px 0 0 16px; font-size: var(--fs-small); opacity: .75; overflow-wrap: anywhere; }
+
+/* The checkbox of a row is as small as the row's other controls */
+.run-check .mud-button-root { padding: 3px; }
+.run-check .mud-icon-root { font-size: 1.375rem; }

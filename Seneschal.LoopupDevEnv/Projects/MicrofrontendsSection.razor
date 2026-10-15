@@ -1,0 +1,287 @@
+@using DevEnvironment.Projects.Commands
+@implements IAsyncDisposable
+@inject CommandStore Store
+@inject CommandRunner Runner
+@inject ShellLauncher Shell
+@inject IDialogService Dialogs
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+<SectionFrame Id="microfrontends-section" Title="Microfrontends" Summary="@Summary" Loading="@Loading">
+    <Toolbar>
+        <MudButton Variant="Variant.Outlined" OnClick="AddAsync" id="add-microfrontends">Add Microfrontends</MudButton>
+        @if (Entries.Count > 0)
+        {
+            <MudTextField T="string" @bind-Value="_query" Immediate="true" Placeholder="Filter microfrontends" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Class="run-search" Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Outlined.Search" />
+            <div class="run-bulk">
+                <MudCheckBox T="bool" Value="AllSelected" ValueChanged="SelectAll" Dense="true" Size="Size.Small" Class="run-select-all" Label="Select all" Disabled="@(Visible.Count == 0)" id="select-all-microfrontends" />
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Outlined.PlayArrow" Disabled="@(SelectedIds.Count == 0)" OnClick="StartSelected" id="start-selected-microfrontends">Start @(SelectedIds.Count == 0 ? "" : SelectedIds.Count.ToString())</MudButton>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Outlined.Stop" Disabled="@(SelectedIds.Count == 0)" OnClick="StopSelected" id="stop-selected-microfrontends">Stop</MudButton>
+            </div>
+        }
+    </Toolbar>
+    <ChildContent>
+        @if (Entries.Count == 0)
+        {
+            <div class="run-empty" id="no-microfrontends">No microfrontends yet</div>
+        }
+        else
+        {
+            <div class="run-list">
+                @foreach (var entry in Visible)
+                {
+                    var run = Runner.Get(entry.Id);
+                    var live = run.Status is RunStatus.Starting or RunStatus.Running;
+                    var busy = _busy.GetValueOrDefault(entry.Id);
+                    var folderOk = Directory.Exists(entry.Directory);
+                    var clash = ClashWith(entry);
+                    <div class="@($"run-row {(busy is null ? $"run-{run.Status.ToString().ToLowerInvariant()}" : "run-starting")}")" data-microfrontend="@entry.Name" data-sort-id="@entry.Id" draggable="true" data-role="@entry.Role" data-status="@(busy is null ? run.Status.ToString() : "Busy")">
+                        <span class="run-grip" title="Drag to reorder" aria-hidden="true"><MudIcon Icon="@Icons.Material.Filled.DragIndicator" Size="Size.Small" /></span>
+                        <MudCheckBox T="bool" Value="_selected.Contains(entry.Id)" ValueChanged="v => Select(entry.Id, v)" Dense="true" Class="run-check" />
+                        <span class="run-dot" title="@run.Status"></span>
+                        <div class="run-main">
+                            <div class="run-title">
+                                <span class="run-name">@entry.Name</span>
+                                <span class="@($"run-badge {(entry.Role == SingleSpaRoles.Root ? "run-badge-root" : "")}")">@SingleSpaRoles.Label(entry.Role)</span>
+                                @if (!folderOk)
+                                {
+                                    <span class="run-badge run-badge-bad">folder missing</span>
+                                }
+                                @if (clash is not null)
+                                {
+                                    <span class="run-badge run-badge-bad" title="Both want the same port so only one can run at a time">port also used by @clash</span>
+                                }
+                            </div>
+                            <div class="run-sub">
+                                @if (entry.Ports.Length == 0)
+                                {
+                                    <span class="run-url-off">No port found</span>
+                                }
+                                @foreach (var port in entry.Ports)
+                                {
+                                    if (run.Status == RunStatus.Running)
+                                    {
+                                        <a href="@($"http://localhost:{port}")" target="_blank" rel="noopener" class="run-url">localhost:@port</a>
+                                    }
+                                    else
+                                    {
+                                        <span class="run-url-off">localhost:@port</span>
+                                    }
+                                }
+                                <span class="run-cmd" title="@entry.Directory">@entry.CommandLine</span>
+                            </div>
+                        </div>
+                        <div class="run-state">
+                            <span class="run-state-text">@(busy is null ? run.Text : busy)</span>
+                        </div>
+                        <div class="run-actions">
+                            @if (live)
+                            {
+                                <MudTooltip Text="Stop"><MudIconButton Icon="@Icons.Material.Filled.Stop" Class="sq-btn run-act-stop" Color="Color.Inherit" Disabled="@(busy is not null)" OnClick="() => StopAsync(entry.Id)" /></MudTooltip>
+                                <MudTooltip Text="Restart"><MudIconButton Icon="@Icons.Material.Outlined.Refresh" Class="sq-btn run-act-restart" Color="Color.Inherit" Disabled="@(busy is not null)" OnClick="() => RestartAsync(entry.Id)" /></MudTooltip>
+                            }
+                            else
+                            {
+                                <MudTooltip Text="@(run.Status == RunStatus.External ? run.Message : "Start")">
+                                    <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Class="sq-btn run-act-start" Color="Color.Inherit"
+                                                   Disabled="@(!folderOk || busy is not null || run.Status == RunStatus.External)" OnClick="() => StartAsync(entry.Id)" />
+                                </MudTooltip>
+                                @if (run.Status == RunStatus.External && run.Pid is not null)
+                                {
+                                    <MudTooltip Text="Stop the process that holds the port (not started here)"><MudIconButton Icon="@Icons.Material.Filled.Stop" Class="sq-btn run-act-stop-external" Color="Color.Inherit" Disabled="@(busy is not null)" OnClick="() => StopExternalAsync(entry)" /></MudTooltip>
+                                }
+                                @if (run.Status == RunStatus.Exited)
+                                {
+                                    <MudTooltip Text="Clear"><MudIconButton Icon="@Icons.Material.Outlined.Close" Class="sq-btn run-act-clear" Color="Color.Inherit" Disabled="@(busy is not null)" OnClick="() => ClearAsync(entry.Id)" /></MudTooltip>
+                                }
+                            }
+                            <MudTooltip Text="Show logs"><MudIconButton Icon="@Icons.Material.Outlined.Terminal" Class="sq-btn run-act-logs" Color="Color.Inherit" OnClick="() => ShowLogs(entry)" /></MudTooltip>
+                            <MudMenu Icon="@Icons.Material.Outlined.MoreVert" Class="sq-btn run-act-more" AriaLabel="More actions" Dense="true">
+                                <MudMenuItem OnClick="() => OpenVsCode(entry)">Open folder in VS Code</MudMenuItem>
+                                <MudMenuItem OnClick="() => Reveal(entry)">Show in Explorer</MudMenuItem>
+                                <MudMenuItem OnClick="() => EditAsync(entry.Id)">Edit</MudMenuItem>
+                                <MudMenuItem OnClick="() => RemoveAsync(entry)">Remove</MudMenuItem>
+                            </MudMenu>
+                        </div>
+                    </div>
+                }
+                @if (Visible.Count == 0)
+                {
+                    <div class="run-empty">No match for "@_query"</div>
+                }
+            </div>
+        }
+    </ChildContent>
+</SectionFrame>
+
+@code {
+    private string _query = "";
+    private readonly HashSet<string> _selected = [];
+
+    /// <summary>What is being done to each microfrontend right now, so its buttons stay locked and the row says so until it is finished.</summary>
+    private readonly Dictionary<string, string> _busy = [];
+
+    private List<CommandEntry> Entries =>
+        [.. Store.OfKind(CommandKinds.SingleSpa)];
+
+    private List<CommandEntry> Visible =>
+        Entries.Where(e => _query.Trim().Length == 0
+            || e.Name.Contains(_query.Trim(), StringComparison.OrdinalIgnoreCase)
+            || SingleSpaRoles.Label(e.Role).Contains(_query.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
+
+    private List<string> SelectedIds => Entries.Select(e => e.Id).Where(_selected.Contains).ToList();
+
+    private bool AllSelected => Visible.Count > 0 && Visible.All(e => _selected.Contains(e.Id));
+
+    private string? Summary
+    {
+        get
+        {
+            var entries = Entries;
+            return entries.Count == 0 ? null : $"{entries.Count(e => Runner.Get(e.Id).Status is RunStatus.Starting or RunStatus.Running)} of {entries.Count} running";
+        }
+    }
+
+    /// <summary>The bar shows while something is being started, stopped or restarted.</summary>
+    private bool Loading => _busy.Count > 0 || Entries.Any(e => Runner.Get(e.Id).Status == RunStatus.Starting);
+
+    protected override void OnInitialized()
+    {
+        Store.Changed += OnChanged;
+        Runner.Changed += OnChanged;
+    }
+
+    private SortableList? _sortable;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // The rows can be dragged into a new order, which is saved
+        if (firstRender) _sortable = await SortableList.CreateAsync(JS, "microfrontends-section", Store.Move);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Store.Changed -= OnChanged;
+        Runner.Changed -= OnChanged;
+        if (_sortable is not null) await _sortable.DisposeAsync();
+    }
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    /// <summary>The name of another microfrontend that wants one of this one's ports, or null.</summary>
+    private string? ClashWith(CommandEntry entry) =>
+        Entries.FirstOrDefault(o => o.Id != entry.Id && o.Ports.Intersect(entry.Ports).Any())?.Name;
+
+    private void Select(string id, bool on)
+    {
+        if (on) _selected.Add(id);
+        else _selected.Remove(id);
+    }
+
+    private void SelectAll(bool on)
+    {
+        foreach (var entry in Visible) Select(entry.Id, on);
+    }
+
+    private void Act(RunResult result)
+    {
+        if (!result.Ok) ErrorReport.Toast(Snackbar, Dialogs, result.Message);
+    }
+
+    /// <summary>
+    /// Runs a start, stop or restart off the UI thread (stopping waits for the process tree to end, which takes seconds) and keeps
+    /// the row locked in the meantime, so a second click can never start a second stop.
+    /// </summary>
+    private async Task Run(string id, string doing, Func<RunResult> action)
+    {
+        if (_busy.ContainsKey(id)) return;
+        _busy[id] = doing;
+        StateHasChanged();
+        try
+        {
+            Act(await Task.Run(action));
+        }
+        finally
+        {
+            _busy.Remove(id);
+        }
+    }
+
+    private Task StartAsync(string id) => Run(id, "Starting", () => Runner.Start(id));
+
+    private Task StopAsync(string id) => Run(id, "Stopping", () => Runner.Stop(id));
+
+    private Task RestartAsync(string id) => Run(id, "Restarting", () => Runner.Restart(id));
+
+    /// <summary>Forgets a command that ended on its own (Stop on an ended command only clears its state).</summary>
+    private Task ClearAsync(string id) => Run(id, "Clearing", () => Runner.Stop(id));
+
+    private async Task StopExternalAsync(CommandEntry entry)
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync("Stop Other Process",
+            $"Stop {entry.Name} in the other process? Unsaved work in it is lost",
+            yesText: "Stop", cancelText: "Cancel");
+        if (confirmed == true) await Run(entry.Id, "Stopping", () => Runner.StopExternal(entry.Id));
+    }
+
+    private static bool IsLive(RunInfo run) => run.Status is RunStatus.Starting or RunStatus.Running;
+
+    /// <summary>
+    /// Starts the ones that are not running yet. Two that want the same port would race for it and the loser would crash,
+    /// so the first one wins and the other is left alone with a note.
+    /// </summary>
+    private Task StartIds(IEnumerable<string> ids)
+    {
+        var taken = new HashSet<int>();
+        var starting = new List<string>();
+        foreach (var id in ids.Distinct().Where(id => !IsLive(Runner.Get(id))))
+        {
+            var entry = Store.Get(id);
+            var ports = entry?.Ports ?? [];
+            if (ports.FirstOrDefault(taken.Contains) is var clash and > 0)
+            {
+                Snackbar.Add($"{entry!.Name} was not started because another one in this batch uses port {clash}", Severity.Warning);
+                continue;
+            }
+            foreach (var port in ports) taken.Add(port);
+            starting.Add(id);
+        }
+        return Task.WhenAll(starting.Select(StartAsync));
+    }
+
+    private Task StartSelected() => StartIds(SelectedIds);
+
+    private Task StopSelected() => Task.WhenAll(SelectedIds.Select(StopAsync));
+
+    /// <summary>One big log window for this microfrontend alone. It never touches the Logs tool's layout or panes.</summary>
+    private Task ShowLogs(CommandEntry entry) =>
+        Dialogs.ShowAsync<ProcessLogDialog>(entry.Name, new DialogParameters<ProcessLogDialog> { { x => x.SourceId, $"command:{entry.Id}" } },
+            new DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true, CloseButton = true, CloseOnEscapeKey = true });
+
+    private void OpenVsCode(CommandEntry entry) => Shell.OpenInEditor(entry.Directory);
+
+    private void Reveal(CommandEntry entry) => Shell.Reveal(entry.Directory);
+
+    private Task AddAsync() =>
+        Dialogs.ShowAsync<AddMicrofrontendsDialog>("Add Microfrontends", new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true });
+
+    private Task EditAsync(string id) =>
+        Dialogs.ShowAsync<EditMicrofrontendDialog>("Edit Microfrontend", new DialogParameters<EditMicrofrontendDialog> { { x => x.Id, id } },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true });
+
+    private async Task RemoveAsync(CommandEntry entry)
+    {
+        var running = IsLive(Runner.Get(entry.Id));
+        var confirmed = await Dialogs.ShowMessageBoxAsync("Remove from List",
+            running
+                ? $"Remove {entry.Name}? It is running and will be stopped first"
+                : $"Remove {entry.Name} from the list?",
+            yesText: "Remove", cancelText: "Cancel");
+        if (confirmed != true) return;
+
+        if (running) await Run(entry.Id, "Stopping", () => Runner.Stop(entry.Id));
+        _selected.Remove(entry.Id);
+        Store.Remove(entry.Id);
+    }
+}

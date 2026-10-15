@@ -1,0 +1,62 @@
+@inject IJSRuntime JS
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(Heading ?? (Errors.Count == 1 ? "Error" : "Errors"))</MudText>
+        @if (Errors.Count > 1)
+        {
+            <MudText Typo="Typo.body2" Style="opacity:.7">@Errors.Count items failed</MudText>
+        }
+    </TitleContent>
+    <DialogContent>
+        <div class="err-list" id="err-list">
+            @foreach (var error in Errors)
+            {
+                <div class="err-card">
+                    <div class="err-head">
+                        <span class="err-dot"></span>
+                        <span class="err-title">@error.Title</span>
+                        <MudTooltip Text="Copy">
+                            <MudIconButton Icon="@Icons.Material.Outlined.ContentCopy" Size="Size.Small" Color="Color.Inherit" aria-label="Copy" OnClick="() => CopyAsync(Text(error))" />
+                        </MudTooltip>
+                    </div>
+                    @if (error.Message.Length > 0)
+                    {
+                        @if (error.Message.Length < 80 && !error.Message.Contains('\n'))
+                    {
+                        <div class="err-line">@error.Message</div>
+                    }
+                    else
+                    {
+                        <pre class="err-text">@error.Message</pre>
+                    }
+                    }
+                </div>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        @if (Errors.Count > 1)
+        {
+            <MudButton OnClick="() => CopyAsync(string.Join(Environment.NewLine + Environment.NewLine, Errors.Select(Text)))">Copy All</MudButton>
+        }
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Close" id="err-close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter, EditorRequired] public IReadOnlyList<ErrorEntry> Errors { get; set; } = [];
+    [Parameter] public string? Heading { get; set; }
+
+    private static string Text(ErrorEntry error) => error.Message.Length == 0 ? error.Title : $"{error.Title}: {error.Message}";
+
+    private async Task CopyAsync(string text)
+    {
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", text); }
+        catch (JSException) { }
+    }
+
+    private void Close() => MudDialog.Close();
+}

@@ -1,0 +1,84 @@
+@implements IDisposable
+@inject LogViewerState Viewer
+@inject LogSources Sources
+@inject NavigationManager Nav
+
+<div class="log-toolbar">
+    <div class="log-layouts" id="log-layouts" role="group" aria-label="Layout">
+        @foreach (var option in Options)
+        {
+            <button type="button" class="@($"log-layout-btn {(Viewer.Layout == option.Layout ? "picked" : "")}")" title="@option.Label" aria-label="@option.Label" data-layout="@option.Layout" @onclick="() => Viewer.SetLayout(option.Layout)">
+                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                    @((MarkupString)option.Svg)
+                </svg>
+            </button>
+        }
+    </div>
+    <span class="log-toolbar-sep" aria-hidden="true"></span>
+    <div class="log-layouts" id="log-wrap-mode" role="group" aria-label="Long lines">
+        <button type="button" class="@($"log-layout-btn {(Viewer.Wrap ? "" : "picked")}")" title="Long lines scroll sideways" aria-label="Long lines scroll sideways" data-wrap="false" @onclick="() => Viewer.SetWrap(false)">
+            <MudIcon Icon="@Icons.Material.Outlined.SwapHoriz" Size="Size.Small" />
+        </button>
+        <button type="button" class="@($"log-layout-btn {(Viewer.Wrap ? "picked" : "")}")" title="Long lines wrap" aria-label="Long lines wrap" data-wrap="true" @onclick="() => Viewer.SetWrap(true)">
+            <MudIcon Icon="@Icons.Material.Outlined.WrapText" Size="Size.Small" />
+        </button>
+    </div>
+    @if (Sources.All.Count == 0)
+    {
+        <span class="log-toolbar-hint" id="no-log-sources">No logs yet, add a project in <MudLink Href="/tools/projects">Projects</MudLink> and start it</span>
+    }
+</div>
+
+<div class="@($"log-grid log-{Viewer.Layout.ToString().ToLowerInvariant()}")" id="log-grid">
+    @for (var i = 0; i < LogViewerState.PaneCount(Viewer.Layout); i++)
+    {
+        <LogPane @key="i" Index="i" Visible="_visible" />
+    }
+</div>
+
+@code {
+    private sealed record LayoutOption(LogLayout Layout, string Label, string Svg);
+
+    private const string Frame = "<rect x='3' y='3' width='18' height='18' rx='2' fill='none' stroke='currentColor' stroke-width='1.6'/>";
+
+    private static readonly LayoutOption[] Options =
+    [
+        new(LogLayout.Single, "One log", Frame),
+        new(LogLayout.Cols2, "Two side by side", Frame + "<path d='M12 3v18' stroke='currentColor' stroke-width='1.6'/>"),
+        new(LogLayout.Rows2, "Two stacked (top and bottom)", Frame + "<path d='M3 12h18' stroke='currentColor' stroke-width='1.6'/>"),
+        new(LogLayout.Grid2x2, "Four in a grid", Frame + "<path d='M12 3v18M3 12h18' stroke='currentColor' stroke-width='1.6'/>"),
+        new(LogLayout.Cols3, "Three side by side", Frame + "<path d='M9 3v18M15 3v18' stroke='currentColor' stroke-width='1.6'/>"),
+        new(LogLayout.Rows3, "Three stacked", Frame + "<path d='M3 9h18M3 15h18' stroke='currentColor' stroke-width='1.6'/>"),
+        new(LogLayout.Cols4, "Four side by side", Frame + "<path d='M7.5 3v18M12 3v18M16.5 3v18' stroke='currentColor' stroke-width='1.6'/>"),
+        new(LogLayout.Rows4, "Four stacked", Frame + "<path d='M3 7.5h18M3 12h18M3 16.5h18' stroke='currentColor' stroke-width='1.6'/>"),
+    ];
+
+    // This tool stays mounted while hidden; the panes only redraw while its page is the one on screen
+    private bool _visible;
+
+    protected override void OnInitialized()
+    {
+        Viewer.Changed += OnChanged;
+        Sources.Changed += OnChanged;
+        Nav.LocationChanged += OnLocationChanged;
+        _visible = IsOnLogs(Nav.Uri);
+    }
+
+    public void Dispose()
+    {
+        Viewer.Changed -= OnChanged;
+        Sources.Changed -= OnChanged;
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+
+    private bool IsOnLogs(string uri) =>
+        Nav.ToBaseRelativePath(uri).StartsWith("tools/logs", StringComparison.OrdinalIgnoreCase);
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e) => _ = InvokeAsync(() =>
+    {
+        _visible = IsOnLogs(e.Location);
+        StateHasChanged();
+    });
+}

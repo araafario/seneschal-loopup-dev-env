@@ -1,0 +1,161 @@
+@using DevEnvironment.Projects.Startup
+@inject StartupStore Store
+@inject RunnableHub Hub
+@inject IDialogService Dialogs
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(PlanId is null ? "New Startup" : "Edit Startup")</MudText>
+        <MudText Typo="Typo.body2" Style="opacity:.7">Choose what starts and when</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField T="string" @bind-Value="_name" Label="Name" Placeholder="Morning start" Immediate="true" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-4" id="su-name" />
+        <MudTextField T="string" @bind-Value="_description" Label="Description (optional)" Placeholder="What it is for" Immediate="true" Variant="Variant.Outlined" Margin="Margin.Dense" id="su-description" />
+
+        <div class="startup-steps-head">
+            <span class="ne-section">Steps</span>
+            <span class="startup-steps-hint">Items in a step start together</span>
+        </div>
+
+        @for (var i = 0; i < _steps.Count; i++)
+        {
+            var index = i;
+            var step = _steps[i];
+            <div class="startup-step-card" data-step="@(index + 1)">
+                <div class="startup-step-head">
+                    <span class="startup-badge-no">@(index + 1)</span>
+                    <div class="startup-step-titles">
+                        <div class="startup-step-title">Step @(index + 1)</div>
+                        <div class="startup-step-sub">@WhenText(index, step)</div>
+                    </div>
+                    <div class="startup-step-tools">
+                        <MudTooltip Text="Move up"><MudIconButton Icon="@Icons.Material.Outlined.ArrowUpward" Size="Size.Small" Color="Color.Inherit" Disabled="@(index == 0)" OnClick="() => Move(index, -1)" /></MudTooltip>
+                        <MudTooltip Text="Move down"><MudIconButton Icon="@Icons.Material.Outlined.ArrowDownward" Size="Size.Small" Color="Color.Inherit" Disabled="@(index == _steps.Count - 1)" OnClick="() => Move(index, 1)" /></MudTooltip>
+                        <MudTooltip Text="Remove this step"><MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="Size.Small" Color="Color.Inherit" Disabled="@(_steps.Count == 1)" OnClick="() => _steps.RemoveAt(index)" /></MudTooltip>
+                    </div>
+                </div>
+
+                <div class="startup-edit-body">
+                    @if (index > 0)
+                    {
+                        <div class="startup-field-label">Starts</div>
+                        <div class="startup-seg" role="group" aria-label="When this step starts">
+                            <button type="button" class="@($"startup-seg-btn {(step.Wait ? "on" : "")}")" aria-pressed="@step.Wait" @onclick="() => step.Wait = true">After step @index</button>
+                            <button type="button" class="@($"startup-seg-btn {(step.Wait ? "" : "on")}")" aria-pressed="@(!step.Wait)" @onclick="() => step.Wait = false">With step @index</button>
+                        </div>
+                    }
+
+                    <div class="startup-field-label">Items</div>
+                    <div class="startup-items startup-items-edit">
+                        @foreach (var item in step.Items.ToList())
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" OnClose="() => step.Items.Remove(item)">@(Hub.Find(item)?.Name ?? item + " (missing)")</MudChip>
+                        }
+                        @if (step.Items.Count == 0)
+                        {
+                            <span class="startup-empty">Empty</span>
+                        }
+                        <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="() => AddItemsAsync(step)" id="@($"su-add-items-{index + 1}")">Add Items</MudButton>
+                    </div>
+
+                    <div class="startup-field-label">Options</div>
+                    <div class="startup-limits">
+                        <MudNumericField T="int" @bind-Value="step.Timeout" Label="Timeout" Min="5" Max="3600" Variant="Variant.Outlined" Margin="Margin.Dense" HideSpinButtons="true"
+                                         Adornment="Adornment.End" AdornmentText="sec" Class="startup-timeout" />
+                        <MudSwitch T="bool" @bind-Value="step.Continue" Color="Color.Primary" Label="Ignore failures" />
+                    </div>
+                </div>
+            </div>
+        }
+
+        <button type="button" class="startup-add-step" @onclick="AddStep" id="su-add-step">
+            <MudIcon Icon="@Icons.Material.Outlined.Add" Size="Size.Small" /> Add step
+        </button>
+
+        @if (_error is not null)
+        {
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mt-4" id="su-error">@_error</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" id="su-save">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private sealed class StepModel
+    {
+        public List<string> Items { get; } = [];
+        public bool Wait { get; set; } = true;
+        public int Timeout { get; set; } = StartupStep.DefaultTimeoutSeconds;
+        public bool Continue { get; set; }
+    }
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    /// <summary>The startup to edit, or null to make a new one.</summary>
+    [Parameter] public string? PlanId { get; set; }
+
+    private string _name = "";
+    private string _description = "";
+    private readonly List<StepModel> _steps = [];
+    private string? _error;
+
+    protected override void OnInitialized()
+    {
+        if (PlanId is not null && Store.Get(PlanId) is { } plan)
+        {
+            _name = plan.Name;
+            _description = plan.Description ?? "";
+            foreach (var step in plan.Steps)
+            {
+                var model = new StepModel { Wait = step.WaitForPrevious, Timeout = step.TimeoutSeconds, Continue = step.ContinueOnFailure };
+                model.Items.AddRange(step.Items);
+                _steps.Add(model);
+            }
+        }
+        if (_steps.Count == 0) _steps.Add(new StepModel());
+    }
+
+    /// <summary>When a step starts, in words.</summary>
+    private static string WhenText(int index, StepModel step) =>
+        index == 0 ? "Starts first" : step.Wait ? $"After step {index}" : $"With step {index}";
+
+    private HashSet<string> AllItems => _steps.SelectMany(s => s.Items).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    private void AddStep() => _steps.Add(new StepModel());
+
+    private void Move(int index, int by)
+    {
+        var target = index + by;
+        if (target < 0 || target >= _steps.Count) return;
+        (_steps[index], _steps[target]) = (_steps[target], _steps[index]);
+    }
+
+    private async Task AddItemsAsync(StepModel step)
+    {
+        var dialog = await Dialogs.ShowAsync<PickRunnablesDialog>("Add Items",
+            new DialogParameters<PickRunnablesDialog> { { x => x.Taken, AllItems } },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true });
+        var result = await dialog.Result;
+        if (result is { Canceled: false, Data: List<string> picked })
+            step.Items.AddRange(picked.Where(p => !step.Items.Contains(p)));
+    }
+
+    private void Save()
+    {
+        if (string.IsNullOrWhiteSpace(_name)) { _error = "Enter a name"; return; }
+
+        var steps = _steps
+            .Where(s => s.Items.Count > 0)
+            .Select(s => new StartupStep([.. s.Items], s.Wait, Math.Clamp(s.Timeout, 5, 3600), s.Continue))
+            .ToList();
+        if (steps.Count == 0) { _error = "Add an item"; return; }
+
+        Store.Save(new StartupPlan(PlanId ?? StartupStore.NewId(), _name.Trim(), steps, string.IsNullOrWhiteSpace(_description) ? null : _description.Trim()));
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

@@ -1,0 +1,317 @@
+@implements IAsyncDisposable
+@inject ProjectStore Store
+@inject ProjectCatalog Catalog
+@inject ProjectRunner Runner
+@inject ShellLauncher Shell
+@inject IDialogService Dialogs
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+<SectionFrame Id="dotnet-section" Title=".NET" Summary="@Summary" Loading="@Loading">
+    <Toolbar>
+        <MudButton Variant="Variant.Outlined" OnClick="AddAsync" id="add-projects">Add Projects</MudButton>
+        @if (Store.All.Count > 0)
+        {
+            <MudTextField T="string" @bind-Value="_query" Immediate="true" Placeholder="Filter projects" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Class="run-search" Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Outlined.Search" />
+            <div class="run-bulk">
+                <MudCheckBox T="bool" Value="AllSelected" ValueChanged="SelectAll" Dense="true" Size="Size.Small" Class="run-select-all" Label="Select all" Disabled="@(Visible.Count() == 0)" id="select-all-projects" />
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Outlined.PlayArrow" Disabled="@(SelectedIds.Count == 0)" OnClick="StartSelected" id="start-selected">Start @(SelectedIds.Count == 0 ? "" : SelectedIds.Count.ToString())</MudButton>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Outlined.Stop" Disabled="@(SelectedIds.Count == 0)" OnClick="StopSelected" id="stop-selected">Stop</MudButton>
+            </div>
+        }
+    </Toolbar>
+    <ChildContent>
+@if (_loading && Store.All.Count > 0)
+{
+    @* The project files are read once in the background: the rows would otherwise make the page wait *@
+    <div class="run-list" id="services-skeleton">
+        @for (var i = 0; i < Math.Min(Store.All.Count, 5); i++)
+        {
+            <div class="run-row run-skeleton">
+                <span class="run-dot"></span>
+                <div class="run-main">
+                    <MudSkeleton Width="35%" />
+                    <MudSkeleton Width="55%" Height="14px" />
+                </div>
+            </div>
+        }
+    </div>
+}
+else if (Store.All.Count == 0)
+{
+    <div class="run-empty" id="no-projects">No projects yet</div>
+}
+else
+{
+    <div class="run-list">
+        @foreach (var entry in Visible)
+        {
+            var info = Catalog.Info(entry.ProjectPath);
+            var run = Runner.Get(entry.Id);
+            var profile = info?.Profile(entry.Profile);
+            var live = run.Status is RunStatus.Starting or RunStatus.Running;
+            var busy = _busy.GetValueOrDefault(entry.Id);
+            <div class="@($"run-row {(busy is null ? $"run-{run.Status.ToString().ToLowerInvariant()}" : "run-starting")}")" data-project="@entry.Name" data-sort-id="@entry.Id" draggable="true" data-status="@(busy is null ? run.Status.ToString() : "Busy")">
+                <span class="run-grip" title="Drag to reorder" aria-hidden="true"><MudIcon Icon="@Icons.Material.Filled.DragIndicator" Size="Size.Small" /></span>
+                <MudCheckBox T="bool" Value="_selected.Contains(entry.Id)" ValueChanged="v => Select(entry.Id, v)" Dense="true" Class="run-check" />
+                <span class="run-dot" title="@run.Status"></span>
+                <div class="run-main">
+                    <div class="run-title">
+                        <span class="run-name">@entry.Name</span>
+                        @if (entry.InstanceOf is not null)
+                        {
+                            <span class="run-badge">instance</span>
+                        }
+                        @if (info is null)
+                        {
+                            <span class="run-badge run-badge-bad">project file missing</span>
+                        }
+                        else
+                        {
+                            @if (info.Kind is not ("Web" or "App"))
+                            {
+                                <span class="run-badge">@info.Kind</span>
+                            }
+                            @foreach (var tfm in info.TargetFrameworks)
+                            {
+                                <span class="run-badge">@tfm</span>
+                            }
+                            @if (entry.Profile is not null && !SameName(entry.Profile, info.Name) && !SameName(entry.Profile, entry.Name))
+                            {
+                                <span class="run-badge">@entry.Profile</span>
+                            }
+                        }
+                    </div>
+                    <div class="run-sub">
+                        @if (profile is not null && profile.Urls.Length > 0)
+                        {
+                            @foreach (var url in profile.Urls.Select(u => ProjectReader.ShiftUrl(u, entry.PortOffset)))
+                            {
+                                if (live && run.Status == RunStatus.Running)
+                                {
+                                    <a href="@url" target="_blank" rel="noopener" class="run-url">@url</a>
+                                }
+                                else
+                                {
+                                    <span class="run-url-off">@url</span>
+                                }
+                            }
+                        }
+                        else
+                        {
+                            <span class="run-url-off">@(info?.Directory ?? entry.ProjectPath)</span>
+                        }
+                    </div>
+                </div>
+                <div class="run-state">
+                    <span class="run-state-text">@(busy is null ? run.Text : busy)</span>
+                </div>
+                <div class="run-actions">
+                    @if (live)
+                    {
+                        <MudTooltip Text="Stop"><MudIconButton Icon="@Icons.Material.Filled.Stop" Class="sq-btn run-act-stop" Color="Color.Inherit" Disabled="@(busy is not null)" OnClick="() => StopAsync(entry.Id)" /></MudTooltip>
+                        <MudTooltip Text="Restart"><MudIconButton Icon="@Icons.Material.Outlined.Refresh" Class="sq-btn run-act-restart" Color="Color.Inherit" Disabled="@(busy is not null)" OnClick="() => RestartAsync(entry.Id)" /></MudTooltip>
+                    }
+                    else
+                    {
+                        <MudTooltip Text="@(run.Status == RunStatus.External ? run.Message : "Start")">
+                            <MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Class="sq-btn run-act-start" Color="Color.Inherit"
+                                           Disabled="@(info is null || busy is not null || run.Status == RunStatus.External)" OnClick="() => StartAsync(entry.Id)" />
+                        </MudTooltip>
+                        @if (run.Status == RunStatus.External && run.Pid is not null)
+                        {
+                            <MudTooltip Text="Stop the process that is running it (not started here)"><MudIconButton Icon="@Icons.Material.Filled.Stop" Class="sq-btn run-act-stop-external" Color="Color.Inherit" Disabled="@(busy is not null)" OnClick="() => StopExternalAsync(entry)" /></MudTooltip>
+                        }
+                        @if (run.Status == RunStatus.Exited)
+                        {
+                            <MudTooltip Text="Clear"><MudIconButton Icon="@Icons.Material.Outlined.Close" Class="sq-btn run-act-clear" Color="Color.Inherit" Disabled="@(busy is not null)" OnClick="() => ClearAsync(entry.Id)" /></MudTooltip>
+                        }
+                    }
+                    <MudTooltip Text="Show logs"><MudIconButton Icon="@Icons.Material.Outlined.Terminal" Class="sq-btn run-act-logs" Color="Color.Inherit" OnClick="() => ShowLogs(entry.Id)" /></MudTooltip>
+                    <MudTooltip Text="@(entry.SolutionPath is null ? "No solution found for this project" : "Open in Visual Studio")">
+                        <MudIconButton Icon="@Icons.Material.Outlined.OpenInNew" Class="sq-btn run-act-vs" Color="Color.Inherit" Disabled="@(entry.SolutionPath is null)" OnClick="() => OpenSolution(entry)" />
+                    </MudTooltip>
+                    <MudMenu Icon="@Icons.Material.Outlined.MoreVert" Class="sq-btn run-act-more" AriaLabel="More actions" Dense="true">
+                        <MudMenuItem OnClick="() => OpenVsCode(entry)">Open folder in VS Code</MudMenuItem>
+                        <MudMenuItem OnClick="() => Reveal(entry)">Show in Explorer</MudMenuItem>
+                        @if (entry.InstanceOf is null)
+                        {
+                            <MudMenuItem OnClick="() => AddInstancesAsync(entry.Id)">Add instances</MudMenuItem>
+                        }
+                        <MudMenuItem OnClick="() => EditAsync(entry.Id)">Edit</MudMenuItem>
+                        <MudMenuItem OnClick="() => RemoveAsync(entry)">Remove</MudMenuItem>
+                    </MudMenu>
+                </div>
+            </div>
+        }
+        @if (!Visible.Any())
+        {
+            <div class="run-empty">No match for "@_query"</div>
+        }
+    </div>
+}
+    </ChildContent>
+</SectionFrame>
+
+@code {
+    private string _query = "";
+    private readonly HashSet<string> _selected = [];
+
+    private IEnumerable<ProjectEntry> Visible =>
+        Store.All.Where(e => _query.Trim().Length == 0 || e.Name.Contains(_query.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>A launch profile named like the project says nothing new, so it is not shown as a badge.</summary>
+    private static bool SameName(string a, string b) => a.Equals(b, StringComparison.OrdinalIgnoreCase);
+
+    private string? Summary => Store.All.Count == 0 ? null : $"{Store.All.Count(e => Runner.Get(e.Id).Status is RunStatus.Starting or RunStatus.Running)} of {Store.All.Count} running";
+
+    private bool AllSelected => Visible.Any() && Visible.All(e => _selected.Contains(e.Id));
+
+    private void SelectAll(bool on)
+    {
+        foreach (var entry in Visible)
+        {
+            if (on) _selected.Add(entry.Id);
+            else _selected.Remove(entry.Id);
+        }
+    }
+
+    private List<string> SelectedIds => Store.All.Select(e => e.Id).Where(_selected.Contains).ToList();
+
+    private bool _loading = true;
+
+    /// <summary>What is being done to each project right now, so its buttons stay locked and the row says so until it is finished.</summary>
+    private readonly Dictionary<string, string> _busy = [];
+
+    /// <summary>The bar shows while the project files are first read and while a project is starting.</summary>
+    private bool Loading => _loading || _busy.Count > 0 || Store.All.Any(e => Runner.Get(e.Id).Status == RunStatus.Starting);
+
+    protected override void OnInitialized()
+    {
+        Store.Changed += OnChanged;
+        Runner.Changed += OnChanged;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Reading a project means its .csproj, launch settings and the solutions above it. It is cached afterwards.
+        var paths = Store.All.Select(e => e.ProjectPath).ToList();
+        if (paths.Count > 0)
+            await Task.Run(() => { foreach (var path in paths) Catalog.Info(path); });
+        _loading = false;
+    }
+
+    private SortableList? _sortable;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // The rows can be dragged into a new order, which is saved
+        if (firstRender) _sortable = await SortableList.CreateAsync(JS, "dotnet-section", Store.Move);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Store.Changed -= OnChanged;
+        Runner.Changed -= OnChanged;
+        if (_sortable is not null) await _sortable.DisposeAsync();
+    }
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private void Select(string id, bool on)
+    {
+        if (on) _selected.Add(id);
+        else _selected.Remove(id);
+    }
+
+    private void Act(RunResult result)
+    {
+        if (!result.Ok) ErrorReport.Toast(Snackbar, Dialogs, result.Message);
+    }
+
+    /// <summary>
+    /// Runs a start, stop or restart off the UI thread (stopping waits for the process tree to end, which takes seconds) and keeps
+    /// the project's row locked in the meantime, so a second click can never start a second stop.
+    /// </summary>
+    private async Task Run(string id, string doing, Func<RunResult> action)
+    {
+        if (_busy.ContainsKey(id)) return;
+        _busy[id] = doing;
+        StateHasChanged();
+        try
+        {
+            Act(await Task.Run(action));
+        }
+        finally
+        {
+            _busy.Remove(id);
+        }
+    }
+
+    private Task StartAsync(string id) => Run(id, "Starting", () => Runner.Start(id));
+
+    private Task StopAsync(string id) => Run(id, "Stopping", () => Runner.Stop(id));
+
+    private Task RestartAsync(string id) => Run(id, "Restarting", () => Runner.Restart(id));
+
+    /// <summary>Forgets a project that ended on its own (Stop on an ended project only clears its state).</summary>
+    private Task ClearAsync(string id) => Run(id, "Clearing", () => Runner.Stop(id));
+
+    private async Task StopExternalAsync(ProjectEntry entry)
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync("Stop Other Process",
+            $"Stop {entry.Name} in the other process? Unsaved work in it is lost",
+            yesText: "Stop", cancelText: "Cancel");
+        if (confirmed == true) await Run(entry.Id, "Stopping", () => Runner.StopExternal(entry.Id));
+    }
+
+    private Task StartSelected() => Task.WhenAll(SelectedIds.Select(StartAsync));
+
+    private Task StopSelected() => Task.WhenAll(SelectedIds.Select(StopAsync));
+
+    /// <summary>One big log window for this project alone. It never touches the Logs tool's layout or panes.</summary>
+    private Task ShowLogs(string id) =>
+        Dialogs.ShowAsync<ProcessLogDialog>(Store.Get(id)?.Name ?? "Logs", new DialogParameters<ProcessLogDialog> { { x => x.SourceId, $"project:{id}" } },
+            new DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true, CloseButton = true, CloseOnEscapeKey = true });
+
+    private void OpenSolution(ProjectEntry entry)
+    {
+        if (entry.SolutionPath is null) return;
+        try { Shell.Open(entry.SolutionPath); }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or FileNotFoundException)
+        {
+            Snackbar.Add($"Could not open {entry.SolutionPath}: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void OpenVsCode(ProjectEntry entry) => Shell.OpenInEditor(Catalog.Info(entry.ProjectPath)?.Directory ?? System.IO.Path.GetDirectoryName(entry.ProjectPath)!);
+
+    private void Reveal(ProjectEntry entry) => Shell.Reveal(entry.ProjectPath);
+
+    private Task AddAsync() =>
+        Dialogs.ShowAsync<AddProjectsDialog>("Add Projects", new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true });
+
+    private Task AddInstancesAsync(string id) =>
+        Dialogs.ShowAsync<AddInstancesDialog>("Add Instances", new DialogParameters<AddInstancesDialog> { { x => x.Id, id } },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true });
+
+    private Task EditAsync(string id) =>
+        Dialogs.ShowAsync<EditProjectDialog>("Edit Project", new DialogParameters<EditProjectDialog> { { x => x.Id, id } },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true });
+
+    private async Task RemoveAsync(ProjectEntry entry)
+    {
+        var running = Runner.Get(entry.Id).Status is RunStatus.Starting or RunStatus.Running;
+        var confirmed = await Dialogs.ShowMessageBoxAsync("Remove Project",
+            running
+                ? $"Remove {entry.Name}? It is running and will be stopped first"
+                : $"Remove {entry.Name} from the list?",
+            yesText: "Remove", cancelText: "Cancel");
+        if (confirmed != true) return;
+
+        if (running) await Run(entry.Id, "Stopping", () => Runner.Stop(entry.Id));
+        _selected.Remove(entry.Id);
+        Store.Remove(entry.Id);
+    }
+}

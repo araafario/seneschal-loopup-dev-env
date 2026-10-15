@@ -1,0 +1,45 @@
+<section class="run-section" id="@Id">
+    <div class="run-section-head" aria-busy="@Loading.ToString().ToLowerInvariant()">
+        <button type="button" class="run-section-toggle" aria-expanded="@_open" aria-controls="@(Id + "-body")" @onclick="() => _open = !_open" id="@(Id + "-toggle")">
+            <MudIcon Icon="@(_open ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)" Size="Size.Small" />
+            <span class="run-section-title">@Title</span>
+            @if (!string.IsNullOrEmpty(Summary))
+            {
+                <span class="run-section-meta" id="@(Id + "-summary")">@Summary</span>
+            }
+        </button>
+        @if (Loading)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="run-section-progress" aria-label="Loading" id="@(Id + "-loading")" />
+        }
+    </div>
+    @if (_open)
+    {
+        <div class="run-section-body" id="@(Id + "-body")">
+            @if (Toolbar is not null)
+            {
+                <div class="run-toolbar">@Toolbar</div>
+            }
+            @ChildContent
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public string Id { get; set; } = "";
+
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+
+    /// <summary>A short line after the title, such as "3 of 8 running".</summary>
+    [Parameter] public string? Summary { get; set; }
+
+    /// <summary>Shows a thin progress bar on the header while something in this section is still being read or done.</summary>
+    [Parameter] public bool Loading { get; set; }
+
+    /// <summary>The buttons and the filter above the list.</summary>
+    [Parameter] public RenderFragment? Toolbar { get; set; }
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private bool _open = true;
+}

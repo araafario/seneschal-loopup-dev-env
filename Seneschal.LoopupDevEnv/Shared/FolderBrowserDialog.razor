@@ -1,0 +1,88 @@
+@* Browses the folders of the machine the app runs on (a browser cannot hand over real paths). Returns the chosen folder. *@
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Choose a folder</MudText>
+    </TitleContent>
+    <DialogContent>
+        <div class="fb-path">
+            <MudIconButton Icon="@Icons.Material.Outlined.ArrowUpward" Class="sq-btn" Color="Color.Inherit" OnClick="Up" Disabled="@(_current.Length == 0)" title="Up" id="fb-up" />
+            <MudTextField T="string" Value="@_current" ValueChanged="Go" Immediate="false" Margin="Margin.Dense" Variant="Variant.Outlined"
+                          Placeholder="Type a path and press Enter" Class="fb-input" id="fb-path" />
+        </div>
+        <div class="fb-list" id="fb-list">
+            @if (_error is not null)
+            {
+                <MudText Class="pa-2" Color="Color.Error">@_error</MudText>
+            }
+            @foreach (var entry in Entries)
+            {
+                <button type="button" class="fb-item" data-folder="@entry" @onclick="() => Go(entry)">
+                    <MudIcon Icon="@(_current.Length == 0 ? Icons.Material.Outlined.Storage : Icons.Material.Outlined.Folder)" Size="Size.Small" />
+                    <span>@Label(entry)</span>
+                </button>
+            }
+            @if (Entries.Count == 0 && _error is null)
+            {
+                <MudText Class="pa-2" Style="opacity:.7">No subfolders</MudText>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Select" Disabled="@(_current.Length == 0)" id="fb-select">Select this folder</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    /// <summary>Where to start. Empty starts at the drive list.</summary>
+    [Parameter] public string Start { get; set; } = "";
+
+    private string _current = "";
+    private string? _error;
+    private List<string> Entries { get; set; } = [];
+
+    protected override void OnParametersSet() => Go(Directory.Exists(Start) ? Start : "");
+
+    private void Go(string? path)
+    {
+        path = path?.Trim().Trim('"') ?? "";
+        _error = null;
+        if (path.Length == 0)
+        {
+            _current = "";
+            Entries = DriveInfo.GetDrives().Where(d => d.IsReady).Select(d => d.Name).ToList();
+            return;
+        }
+        if (!Directory.Exists(path))
+        {
+            _error = $"'{path}' is not a folder";
+            return;
+        }
+        try
+        {
+            Entries = Directory.EnumerateDirectories(path)
+                .Where(d => (new DirectoryInfo(d).Attributes & FileAttributes.Hidden) == 0)
+                .OrderBy(d => d, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            _current = Path.GetFullPath(path);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            _error = $"Cannot open this folder: {ex.Message}";
+        }
+    }
+
+    private void Up()
+    {
+        var parent = Directory.GetParent(_current.TrimEnd(Path.DirectorySeparatorChar));
+        Go(parent?.FullName ?? "");
+    }
+
+    private string Label(string entry) => _current.Length == 0 ? entry : Path.GetFileName(entry);
+
+    private void Select() => MudDialog.Close(DialogResult.Ok(_current));
+
+    private void Cancel() => MudDialog.Cancel();
+}

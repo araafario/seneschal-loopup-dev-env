@@ -1,0 +1,130 @@
+@using DevEnvironment.Projects.Docker
+@implements IDisposable
+@inject DockerRunner Docker
+@inject DockerStore Store
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Add Containers</MudText>
+        <MudText Typo="Typo.body2" Style="opacity:.7">Pick the containers to show</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (Docker.Engine is EngineState.Down or EngineState.Missing)
+        {
+            <MudAlert Severity="@(Docker.Engine == EngineState.Down ? Severity.Warning : Severity.Error)" Dense="true" id="add-docker-down">
+                @Docker.EngineMessage
+                @if (Docker.Engine == EngineState.Down)
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Class="ml-3" OnClick="StartDesktop" id="add-docker-start-desktop">Start Docker Desktop</MudButton>
+                }
+            </MudAlert>
+        }
+        else if (Docker.Engine == EngineState.Unknown)
+        {
+            <MudProgressLinear Indeterminate="true" Class="my-2" id="add-docker-loading" />
+            <MudText Style="opacity:.7">Reading containers from Docker</MudText>
+        }
+        else
+        {
+            <MudTextField T="string" @bind-Value="_query" Immediate="true" Placeholder="Filter containers" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Outlined.Search" Class="mb-2" id="add-container-filter" />
+            <div class="add-list add-list-tall" id="add-container-list">
+                @foreach (var group in Groups)
+                {
+                    var open = group.Where(c => !Store.Contains(c.Name)).ToList();
+                    <div class="add-group-head" data-group="@group.Key">
+                        <MudCheckBox T="bool" Value="@(open.Count > 0 && open.All(c => _selected.Contains(c.Name)))" ValueChanged="v => ToggleGroup(open, v)"
+                                     Disabled="@(open.Count == 0)" Dense="true" />
+                        <span class="run-group-name">@group.Key</span>
+                        <span class="run-group-count">@group.Count()</span>
+                    </div>
+                    @foreach (var c in group)
+                    {
+                        var added = Store.Contains(c.Name);
+                        <label class="@($"add-item {(added ? "is-added" : "")}")" data-container="@c.Name">
+                            <MudCheckBox T="bool" Value="@(added || _selected.Contains(c.Name))" ValueChanged="v => Toggle(c.Name, v)" Disabled="added" Dense="true" />
+                            <div class="add-text">
+                                <MudText Typo="Typo.subtitle2">
+                                    @c.Name
+                                    <span class="run-badge">@ShortImage(c.Image)</span>
+                                    <span class="run-badge">@(c.Running ? "running" : "stopped")</span>
+                                    @if (added) { <span class="run-badge">already added</span> }
+                                </MudText>
+                            </div>
+                        </label>
+                    }
+                }
+                @if (!Groups.Any())
+                {
+                    <MudText Style="opacity:.7" Class="pa-2">@(Docker.Containers.Count == 0 ? "Docker has no containers yet" : $"No container matches \"{_query}\"")</MudText>
+                }
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Add" Disabled="@(_selected.Count == 0)" id="add-containers-confirm">Add @(_selected.Count == 0 ? "" : _selected.Count.ToString())</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private string _query = "";
+    private readonly HashSet<string> _selected = new(StringComparer.OrdinalIgnoreCase);
+
+    private IEnumerable<IGrouping<string, ContainerInfo>> Groups =>
+        Docker.Containers
+            .Where(Matches)
+            .GroupBy(c => c.Project ?? "Other containers")
+            .OrderBy(g => g.Key == "Other containers" ? 1 : 0)
+            .ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+
+    protected override void OnInitialized() => Docker.Changed += OnChanged;
+
+    public void Dispose() => Docker.Changed -= OnChanged;
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private bool Matches(ContainerInfo c)
+    {
+        var q = _query.Trim();
+        return q.Length == 0
+            || c.Name.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || c.Image.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || (c.Project?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
+    private static string ShortImage(string image)
+    {
+        var name = image[(image.LastIndexOf('/') + 1)..];
+        return name.Length > 0 ? name : image;
+    }
+
+    private void Toggle(string name, bool on)
+    {
+        if (on) _selected.Add(name);
+        else _selected.Remove(name);
+    }
+
+    private void ToggleGroup(IEnumerable<ContainerInfo> containers, bool on)
+    {
+        foreach (var c in containers) Toggle(c.Name, on);
+    }
+
+    private void StartDesktop()
+    {
+        var result = Docker.StartDockerDesktop();
+        if (!result.Ok) Snackbar.Add(result.Message, Severity.Error);
+    }
+
+    private void Add()
+    {
+        // In the order of the list the user was looking at
+        Store.Add(Groups.SelectMany(g => g).Where(c => _selected.Contains(c.Name)).Select(c => c.Name));
+        MudDialog.Close(DialogResult.Ok(_selected.Count));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

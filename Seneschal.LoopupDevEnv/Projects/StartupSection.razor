@@ -1,0 +1,201 @@
+@using DevEnvironment.Projects.Startup
+@implements IAsyncDisposable
+@inject StartupStore Store
+@inject StartupRunner Runner
+@inject RunnableHub Hub
+@inject IDialogService Dialogs
+@inject IJSRuntime JS
+
+<SectionFrame Id="startup-section" Title="Smart Startup" Summary="@Summary" Loading="@Runner.AnyBusy">
+    <Toolbar>
+        <MudButton Variant="Variant.Outlined" OnClick="() => EditAsync(null)" id="add-startup">New Startup</MudButton>
+    </Toolbar>
+    <ChildContent>
+        @if (Store.All.Count == 0)
+        {
+            <div class="run-empty" id="no-startups">No startups yet</div>
+        }
+        else
+        {
+            <div class="run-list">
+                @foreach (var plan in Store.All)
+                {
+                    var status = Runner.Get(plan.Id);
+                    var state = status?.State ?? PlanState.Idle;
+                    var busy = status?.Busy == true;
+                    var detail = _open.Contains(plan.Id) || busy || state == PlanState.Failed;
+                    <div class="@($"run-row {RowClass(state)}")" data-startup="@plan.Name" data-sort-id="@plan.Id" draggable="true" data-state="@state">
+                        <span class="run-grip" title="Drag to reorder" aria-hidden="true"><MudIcon Icon="@Icons.Material.Filled.DragIndicator" Size="Size.Small" /></span>
+                        <MudTooltip Text="@(detail ? "Hide steps" : "Show steps")">
+                            <MudIconButton Icon="@(detail ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)" Size="Size.Small" Class="startup-expand" Color="Color.Inherit"
+                                           OnClick="() => Toggle(plan.Id)" />
+                        </MudTooltip>
+                        <span class="run-dot" title="@state"></span>
+                        <div class="run-main">
+                            <div class="run-title">
+                                <span class="run-name">@plan.Name</span>
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(plan.Description))
+                            {
+                                <div class="run-sub"><span class="run-url-off" title="@plan.Description">@plan.Description</span></div>
+                            }
+                        </div>
+                        @if (state == PlanState.Failed && status is not null)
+                        {
+                            var errors = ErrorsOf(status);
+                            <div class="run-state run-state-error">
+                                <span class="run-state-text">Failed</span>
+                                <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" OnClick="() => ShowErrorsAsync(plan.Name, errors)" id="startup-errors">@(errors.Count == 1 ? "1 error" : $"{errors.Count} errors")</MudButton>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="run-state"><span class="run-state-text">@(status?.Message ?? "Idle")</span></div>
+                        }
+                        <div class="run-actions">
+                            @if (state == PlanState.Running)
+                            {
+                                <MudTooltip Text="Cancel"><MudIconButton Icon="@Icons.Material.Outlined.Close" Class="sq-btn run-act-cancel" Color="Color.Inherit" OnClick="() => Runner.Cancel(plan.Id)" /></MudTooltip>
+                            }
+                            else
+                            {
+                                <MudTooltip Text="Start"><MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Class="sq-btn run-act-start" Color="Color.Inherit" Disabled="@busy" OnClick="() => Runner.Start(plan.Id)" /></MudTooltip>
+                            }
+                            <MudTooltip Text="Stop"><MudIconButton Icon="@Icons.Material.Filled.Stop" Class="sq-btn run-act-stop" Color="Color.Inherit" Disabled="@(state == PlanState.Stopping)" OnClick="() => StopAsync(plan)" /></MudTooltip>
+                            <MudMenu Icon="@Icons.Material.Outlined.MoreVert" Class="sq-btn run-act-more" AriaLabel="More actions" Dense="true">
+                                <MudMenuItem OnClick="() => EditAsync(plan.Id)">Edit</MudMenuItem>
+                                <MudMenuItem OnClick="() => DeleteAsync(plan)">Delete</MudMenuItem>
+                            </MudMenu>
+                        </div>
+                    </div>
+                    @if (detail)
+                    {
+                        <div class="startup-detail" data-startup-detail="@plan.Name">
+                            @for (var i = 0; i < plan.Steps.Count; i++)
+                            {
+                                var step = plan.Steps[i];
+                                var number = i + 1;
+                                <div class="startup-step-row">
+                                    <span class="startup-step-no">@number</span>
+                                    <div class="startup-step-main">
+                                        <div class="startup-step-note">@foreach (var note in StepNote(i, step)) { <span>@note</span> }</div>
+                                        <div class="startup-items">
+                                            @foreach (var item in step.Items)
+                                            {
+                                                var run = status?.Items.GetValueOrDefault(item);
+                                                <span class="@($"startup-item item-{(run?.Phase ?? ItemPhase.Waiting).ToString().ToLowerInvariant()}")" title="@(run?.Message ?? ItemText(run?.Phase))" data-item="@item">
+                                                    <span class="startup-item-dot"></span>@(Hub.Find(item)?.Name ?? item + " (missing)")
+                                                </span>
+                                            }
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                }
+            </div>
+        }
+    </ChildContent>
+</SectionFrame>
+
+@code {
+    private readonly HashSet<string> _open = [];
+
+    private string? Summary => Store.All.Count == 0 ? null : $"{Store.All.Count} startup{(Store.All.Count == 1 ? "" : "s")}";
+
+    protected override void OnInitialized()
+    {
+        Store.Changed += OnChanged;
+        Runner.Changed += OnChanged;
+    }
+
+    private SortableList? _sortable;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // The rows can be dragged into a new order, which is saved
+        if (firstRender) _sortable = await SortableList.CreateAsync(JS, "startup-section", Store.Move);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Store.Changed -= OnChanged;
+        Runner.Changed -= OnChanged;
+        if (_sortable is not null) await _sortable.DisposeAsync();
+    }
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private IReadOnlyList<ErrorEntry> ErrorsOf(PlanStatus status)
+    {
+        var errors = status.Items
+            .Where(i => i.Value.Phase == ItemPhase.Failed)
+            .Select(i => new ErrorEntry(Hub.Find(i.Key)?.Name ?? i.Key, Reason(i.Value.Message)))
+            .ToList();
+        if (errors.Count == 0) errors.Add(ErrorReport.Split(status.Message));
+        return errors;
+    }
+
+    /// <summary>"Could not start Identity: the file is locked" becomes "the file is locked" because the card is already titled Identity.</summary>
+    private static string Reason(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return "Failed";
+        var split = ErrorReport.Split(message);
+        return split.Title.StartsWith("Could not start", StringComparison.Ordinal) && split.Message.Length > 0 ? split.Message : message;
+    }
+
+    private Task ShowErrorsAsync(string plan, IReadOnlyList<ErrorEntry> errors) => ErrorReport.ShowAsync(Dialogs, errors, plan);
+
+    private void Toggle(string id)
+    {
+        if (!_open.Remove(id)) _open.Add(id);
+    }
+
+    private static string RowClass(PlanState state) => state switch
+    {
+        PlanState.Running or PlanState.Stopping => "run-starting",
+        PlanState.Ready => "run-running",
+        PlanState.Failed => "run-exited",
+        _ => "run-stopped",
+    };
+
+    /// <summary>When a step starts, and anything unusual about it, as separate words.</summary>
+    private static IEnumerable<string> StepNote(int index, StartupStep step)
+    {
+        yield return index == 0 ? "Starts first" : step.WaitForPrevious ? $"After step {index}" : $"With step {index}";
+        if (step.TimeoutSeconds != StartupStep.DefaultTimeoutSeconds) yield return $"Timeout {step.TimeoutSeconds}s";
+        if (step.ContinueOnFailure) yield return "Ignores failures";
+    }
+
+    private static string ItemText(ItemPhase? phase) => phase switch
+    {
+        ItemPhase.Starting => "Starting",
+        ItemPhase.Ready => "Ready",
+        ItemPhase.AlreadyRunning => "Already running",
+        ItemPhase.Failed => "Failed",
+        _ => "Waiting",
+    };
+
+    private Task EditAsync(string? id) =>
+        Dialogs.ShowAsync<StartupPlanDialog>(id is null ? "New Startup" : "Edit Startup",
+            new DialogParameters<StartupPlanDialog> { { x => x.PlanId, id } },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true });
+
+    private async Task StopAsync(StartupPlan plan)
+    {
+        var count = plan.Steps.SelectMany(s => s.Items).Distinct().Count();
+        var confirmed = await Dialogs.ShowMessageBoxAsync("Stop Startup",
+            $"Stop {count} item{(count == 1 ? "" : "s")}?",
+            yesText: "Stop", cancelText: "Cancel");
+        if (confirmed == true) Runner.Stop(plan.Id);
+    }
+
+    private async Task DeleteAsync(StartupPlan plan)
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync("Delete Startup",
+            $"Delete {plan.Name}?",
+            yesText: "Delete", cancelText: "Cancel");
+        if (confirmed == true) Store.Remove(plan.Id);
+    }
+}

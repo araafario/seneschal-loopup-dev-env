@@ -1,0 +1,122 @@
+@inject ProjectStore Store
+@inject ProjectCatalog Catalog
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Edit Project</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_entry is null || _info is null)
+        {
+            <MudAlert Severity="Severity.Warning">Project not found</MudAlert>
+        }
+        else
+        {
+            <MudTextField T="string" @bind-Value="_name" Label="Name" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" id="ep-name" />
+
+            <MudSelect T="string" @bind-Value="_profile" Label="Launch profile" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" id="ep-profile"
+                       HelperText="@ProfileHelp">
+                <MudSelectItem T="string" Value="@NoProfile">(none: do not use a launch profile)</MudSelectItem>
+                @foreach (var profile in _info.Profiles)
+                {
+                    <MudSelectItem T="string" Value="@profile.Name">@profile.Name @(profile.Urls.Length > 0 ? $"  ({string.Join(", ", profile.Urls)})" : "")</MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudSelect T="string" @bind-Value="_solution" Label="Open in Visual Studio with" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" id="ep-solution"
+                       HelperText="@(_info.Solutions.Count == 0 ? "No solution containing this project was found above its folder." : null)">
+                <MudSelectItem T="string" Value="@NoSolution">(none)</MudSelectItem>
+                @foreach (var solution in _info.Solutions)
+                {
+                    <MudSelectItem T="string" Value="@solution">@solution</MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudTextField T="string" @bind-Value="_env" Label="Environment variables" Lines="3" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" id="ep-env"
+                          Placeholder="KEY=value one per line"
+                          HelperText="Overrides the launch profile" />
+
+            @if (_entry.InstanceOf is not null)
+            {
+                <MudNumericField T="int" @bind-Value="_offset" Label="Port offset" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" id="ep-offset" HideSpinButtons="true"
+                                 HelperText="Added to every port of the project" />
+            }
+
+            <MudTextField T="string" @bind-Value="_args" Label="Arguments" Variant="Variant.Outlined" Margin="Margin.Dense" id="ep-args"
+                          HelperText="Passed to the app after --" />
+
+            <MudText Typo="Typo.caption" Class="mt-3" Style="opacity:.7">@_info.Path</MudText>
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2" id="ep-error">@_error</MudAlert>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="@(_entry is null)" id="ep-save">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private const string NoProfile = "\u0000none";
+    private const string NoSolution = "\u0000none";
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter, EditorRequired] public string Id { get; set; } = "";
+
+    private ProjectEntry? _entry;
+    private ProjectInfo? _info;
+    private string _name = "";
+    private string _profile = NoProfile;
+    private string _solution = NoSolution;
+    private string _env = "";
+    private string _args = "";
+    private int _offset;
+    private string? _error;
+
+    private string? ProfileHelp =>
+        _info?.Profile(_profile is NoProfile ? null : _profile) is { } p && p.Ports.Count > 0 ? $"Listens on port {string.Join(", ", p.Ports)}" : null;
+
+    protected override void OnInitialized()
+    {
+        _entry = Store.Get(Id);
+        _info = _entry is null ? null : Catalog.Info(_entry.ProjectPath);
+        if (_entry is null) return;
+
+        _name = _entry.Name;
+        _profile = _entry.Profile ?? NoProfile;
+        _solution = _entry.SolutionPath ?? NoSolution;
+        _env = string.Join(Environment.NewLine, _entry.Env.Select(p => $"{p.Key}={p.Value}"));
+        _args = _entry.Args;
+        _offset = _entry.PortOffset;
+    }
+
+    private void Save()
+    {
+        if (_entry is null) return;
+        if (string.IsNullOrWhiteSpace(_name)) { _error = "Give the project a name."; return; }
+
+        var env = new Dictionary<string, string>();
+        foreach (var raw in _env.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var split = raw.IndexOf('=');
+            if (split <= 0) { _error = $"'{raw}' is not KEY=value"; return; }
+            env[raw[..split].Trim()] = raw[(split + 1)..].Trim();
+        }
+
+        Store.Update(_entry with
+        {
+            Name = _name.Trim(),
+            Profile = _profile == NoProfile ? null : _profile,
+            SolutionPath = _solution == NoSolution ? null : _solution,
+            Env = env,
+            Args = _args.Trim(),
+            PortOffset = _entry.InstanceOf is not null ? _offset : _entry.PortOffset,
+        });
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

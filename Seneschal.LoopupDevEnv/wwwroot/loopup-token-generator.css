@@ -1,0 +1,20 @@
+/* LoopUp Token Generator. Class names start with lt- so they cannot collide with the app or other extensions */
+.lt-page { max-width: 760px; }
+.lt-form { display: grid; grid-template-columns: 160px 1fr 1fr 140px; gap: 12px; align-items: start; }
+.lt-get.mud-button-root.mud-button { min-height: 0; height: var(--h-ctl-sm); }
+.lt-action { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.lt-spin.mud-progress-circular { width: 20px; height: 20px; flex: none; }
+.lt-hint { margin-top: var(--gap-1); font-size: var(--fs-small); color: var(--fg-dim); }
+.lt-result { margin-top: 20px; border: 1px solid var(--border); border-radius: 6px; padding: 12px 16px; }
+.lt-result-head { display: flex; align-items: center; gap: 8px; }
+.lt-more { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border); }
+.lt-result-title { font-size: .95rem; font-weight: 600; }
+.lt-expiry { font-size: var(--fs-small); color: var(--fg-dim); }
+.lt-expired { color: var(--bad, #f44336); opacity: 1; }
+.lt-spacer { flex: 1; }
+.lt-token { margin: 8px 0 0; padding: 8px 12px; border-radius: 4px; background: var(--terminal, rgba(0,0,0,.25)); font-family: Consolas, monospace; font-size: .8125rem; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 140px; overflow-y: auto; }
+.lt-claims { margin-top: 12px; display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; font-size: .8125rem; }
+.lt-claim { display: contents; }
+.lt-claim-name { opacity: .6; }
+.lt-claim-value { overflow-wrap: anywhere; }
+@media (max-width: 900px) { .lt-form { grid-template-columns: 1fr; } }

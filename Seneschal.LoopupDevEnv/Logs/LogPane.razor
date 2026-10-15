@@ -1,0 +1,197 @@
+@using System.Text.RegularExpressions
+@implements IDisposable
+@inject LogViewerState Viewer
+@inject LogSources Sources
+@inject LogHub Hub
+
+<div class="log-pane" data-pane="@Index">
+    <div class="log-pane-head">
+        @if (!Fixed)
+        {
+        <select class="log-select" @onchange="OnSourcePicked" aria-label="Log" data-role="source">
+            <option value="" selected="@(_sourceId is null)">None</option>
+            @foreach (var group in Sources.All.GroupBy(s => s.Group))
+            {
+                <optgroup label="@group.Key">
+                    @foreach (var source in group)
+                    {
+                        <option value="@source.Id" selected="@(source.Id == _sourceId)">@source.Title</option>
+                    }
+                </optgroup>
+            }
+            @if (_sourceId is not null && _source is null)
+            {
+                <option value="@_sourceId" selected>(removed)</option>
+            }
+        </select>
+        }
+        <div class="log-filter-wrap">
+            <input class="log-filter" placeholder="Filter" @bind-value="_filter" @bind-value:event="oninput" aria-label="Filter" />
+            @if (_filter.Length > 0)
+            {
+                <button type="button" class="log-filter-clear" title="Clear filter" aria-label="Clear filter" @onclick="@(() => _filter = "")" data-role="clear-filter">
+                    <MudIcon Icon="@Icons.Material.Filled.Close" Size="Size.Small" />
+                </button>
+            }
+        </div>
+        <button type="button" class="@($"log-btn {(_paused ? "on" : "")}")" title="@(_paused ? "Resume" : "Pause")" @onclick="TogglePause" data-role="pause">
+            <MudIcon Icon="@(_paused ? Icons.Material.Filled.PlayArrow : Icons.Material.Filled.Pause)" Size="Size.Small" />
+        </button>
+        <button type="button" class="log-btn" title="Clear" @onclick="Clear" data-role="clear">
+            <MudIcon Icon="@Icons.Material.Outlined.DeleteSweep" Size="Size.Small" />
+        </button>
+        <button type="button" class="@($"log-btn {(Wrap ? "on" : "")}")" title="@(Wrap ? "Wrapping: click to scroll sideways instead" : "Scrolling sideways: click to wrap long lines")" @onclick="() => _wrapOverride = !Wrap" data-role="wrap">
+            <MudIcon Icon="@Icons.Material.Outlined.WrapText" Size="Size.Small" />
+        </button>
+    </div>
+    @if (_paused && NewWhilePaused > 0)
+    {
+        <div class="log-paused" data-role="paused">Paused, @NewWhilePaused new line@(NewWhilePaused == 1 ? "" : "s") waiting</div>
+    }
+    <div class="log-scroll">
+        <div class="@($"log-body {(Wrap ? "wrap" : "")}")">
+            @if (_feed is null)
+            {
+                <div class="log-empty">@(_sourceId is null ? "Select a log above" : "This log is no longer available")</div>
+            }
+            else
+            {
+                var lines = Lines.ToList();
+                @foreach (var line in lines)
+                {
+                    <div @key="line.Seq" class="@LineClass(line.Text)">@(line.Text.Length == 0 ? " " : line.Text)</div>
+                }
+                @if (lines.Count == 0)
+                {
+                    <div class="log-empty" data-role="no-lines">@(_filter.Trim().Length > 0 ? "No line matches the filter" : "No output yet")</div>
+                }
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private const int MaxShown = 1000;
+    private static readonly Regex ErrorLine = new(@"^\s*(fail|crit):|\b(exception|error)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex WarnLine = new(@"^\s*warn:", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex DimLine = new(@"^\s*(trce|dbug):|^===|^---", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>The pane's place in the Logs tool. Not used by a pane with a <see cref="SourceId"/>.</summary>
+    [Parameter] public int Index { get; set; } = -1;
+
+    /// <summary>
+    /// Shows this one log and nothing else: no picker, and the Logs tool's layout and panes are neither read nor changed.
+    /// Used where a log is shown for one project or container on its own.
+    /// </summary>
+    [Parameter] public string? SourceId { get; set; }
+
+    private bool Fixed => SourceId is not null;
+
+    /// <summary>False while the log viewer's page is hidden, so nothing is redrawn for nobody.</summary>
+    [Parameter] public bool Visible { get; set; } = true;
+
+    private string? _sourceId;
+    private LogSource? _source;
+    private LogFeed? _feed;
+    private string? _path;
+    private string _filter = "";
+    private bool _paused;
+    private long _pausedAt;
+    private long _clearedAt;
+    private bool? _wrapOverride;
+    private bool _lastViewerWrap;
+
+    /// <summary>The viewer-wide setting, unless this pane was switched on its own.</summary>
+    private bool Wrap => _wrapOverride ?? Viewer.Wrap;
+
+    private long NewWhilePaused => _feed is null ? 0 : _feed.LastSeq - _pausedAt;
+
+    private IEnumerable<LogLine> Lines
+    {
+        get
+        {
+            if (_feed is null) return [];
+            var filter = _filter.Trim();
+            return _feed.Snapshot()
+                .Where(l => l.Seq > _clearedAt && (!_paused || l.Seq <= _pausedAt))
+                .Where(l => filter.Length == 0 || l.Text.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                .TakeLast(MaxShown);
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        Viewer.Changed += OnViewerChanged;
+        Sources.Changed += OnViewerChanged;
+        _lastViewerWrap = Viewer.Wrap;
+        Attach(Fixed ? SourceId : Viewer.Pane(Index));
+    }
+
+    protected override bool ShouldRender() => Visible;
+
+    public void Dispose()
+    {
+        Viewer.Changed -= OnViewerChanged;
+        Sources.Changed -= OnViewerChanged;
+        Detach();
+    }
+
+    private void OnViewerChanged() => _ = InvokeAsync(() =>
+    {
+        // Choosing Scroll or Wrap in the toolbar applies to every pane again (a fixed pane keeps its own choice)
+        if (Viewer.Wrap != _lastViewerWrap)
+        {
+            _lastViewerWrap = Viewer.Wrap;
+            if (!Fixed) _wrapOverride = null;
+        }
+        var wanted = Fixed ? SourceId : Viewer.Pane(Index);
+        if (wanted != _sourceId || (wanted is not null && _feed is null && Sources.Find(wanted) is not null))
+            Attach(wanted);
+        else
+            _source = Sources.Find(_sourceId);
+        StateHasChanged();
+    });
+
+    private void OnSourcePicked(ChangeEventArgs e) => Viewer.SetPane(Index, e.Value?.ToString());
+
+    private void Attach(string? sourceId)
+    {
+        Detach();
+        _sourceId = sourceId;
+        _source = Sources.Find(sourceId);
+        _paused = false;
+        _clearedAt = 0;
+        if (_source is null) return;
+
+        _path = _source.Path;
+        _feed = Hub.Acquire(_path);
+        _feed.Changed += OnFeedChanged;
+    }
+
+    private void Detach()
+    {
+        if (_feed is not null) _feed.Changed -= OnFeedChanged;
+        if (_path is not null) Hub.Release(_path);
+        _feed = null;
+        _path = null;
+    }
+
+    private void OnFeedChanged()
+    {
+        if (Visible) _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void TogglePause()
+    {
+        _paused = !_paused;
+        _pausedAt = _feed?.LastSeq ?? 0;
+    }
+
+    private void Clear() => _clearedAt = _feed?.LastSeq ?? 0;
+
+    private static string LineClass(string text) =>
+        WarnLine.IsMatch(text) ? "log-line ll-warn"
+        : ErrorLine.IsMatch(text) ? "log-line ll-error"
+        : DimLine.IsMatch(text) ? "log-line ll-dim"
+        : "log-line";
+}

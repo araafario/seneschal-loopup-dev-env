@@ -1,0 +1,144 @@
+@inject ProjectStore Store
+@inject IDialogService Dialogs
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Add Projects</MudText>
+    </TitleContent>
+    <DialogContent>
+        <div class="add-path">
+            <MudTextField T="string" @bind-Value="_path" Label="Folder or project file" Placeholder="C:\path\to\your\repos" Immediate="true"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="add-input" id="add-path"
+                          OnKeyDown="OnPathKey" />
+            <MudButton Variant="Variant.Outlined" OnClick="BrowseAsync" id="add-browse">Browse</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ScanAsync" Disabled="@(_scanning || string.IsNullOrWhiteSpace(_path))" id="add-scan">Scan</MudButton>
+        </div>
+        <MudSwitch T="bool" @bind-Value="_includeAll" Color="Color.Primary" Label="Also show libraries and test projects" id="add-include-all" />
+        @if (_scanning)
+        {
+            <MudProgressLinear Indeterminate="true" Class="my-2" />
+        }
+        @if (_message is not null)
+        {
+            <MudText Class="my-2" Style="opacity:.8" id="add-message">@_message</MudText>
+        }
+        <div class="add-list" id="add-list">
+            @foreach (var project in Visible)
+            {
+                var added = Store.Contains(project.Path);
+                <label class="@($"add-item {(added ? "is-added" : "")}")" data-project="@project.Name">
+                    <MudCheckBox T="bool" Value="@(added || _selected.Contains(project.Path))" ValueChanged="v => Toggle(project.Path, v)" Disabled="added" Dense="true" />
+                    <div class="add-text">
+                        <MudText Typo="Typo.subtitle2">@project.Name <span class="run-badge">@project.Kind</span> @foreach (var tfm in project.TargetFrameworks) { <span class="run-badge">@tfm</span> }@if (added) { <span class="run-badge">already added</span> }</MudText>
+                        <MudText Typo="Typo.caption" Style="opacity:.7">@Relative(project.Path)</MudText>
+                    </div>
+                </label>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Add" Disabled="@(_selected.Count == 0)" id="add-confirm">Add @(_selected.Count == 0 ? "" : _selected.Count.ToString())</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private string _path = "";
+    private bool _includeAll;
+    private bool _scanning;
+    private string? _message;
+    private IReadOnlyList<ProjectInfo> _found = [];
+    private readonly HashSet<string> _selected = new(StringComparer.OrdinalIgnoreCase);
+
+    private IEnumerable<ProjectInfo> Visible => _found.Where(p => _includeAll || p.IsRunnable);
+
+    protected override void OnInitialized()
+    {
+        var repos = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "source", "repos");
+        if (Directory.Exists(repos)) _path = repos;
+    }
+
+    private async Task OnPathKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await ScanAsync();
+    }
+
+    private async Task BrowseAsync()
+    {
+        var dialog = await Dialogs.ShowAsync<FolderBrowserDialog>("Choose a Folder",
+            new DialogParameters<FolderBrowserDialog> { { x => x.Start, _path } },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        var result = await dialog.Result;
+        if (result is { Canceled: false, Data: string folder })
+        {
+            _path = folder;
+            await ScanAsync();
+        }
+    }
+
+    private async Task ScanAsync()
+    {
+        var path = _path.Trim().Trim('"');
+        if (!Directory.Exists(path) && !File.Exists(path))
+        {
+            _message = "Folder not found";
+            _found = [];
+            return;
+        }
+
+        _scanning = true;
+        _message = null;
+        StateHasChanged();
+        try
+        {
+            _found = await Task.Run(() => ProjectReader.Scan(path, includeNonRunnable: true));
+        }
+        finally
+        {
+            _scanning = false;
+        }
+
+        var runnable = _found.Count(p => p.IsRunnable);
+        _message = _found.Count == 0
+            ? "No projects found"
+            : $"Found {runnable} project{(runnable == 1 ? "" : "s")}" + (_found.Count > runnable ? $" and {_found.Count - runnable} more" : "");
+        // Preselect the runnable ones that are not in the list yet when the result is small enough to be a deliberate pick
+        _selected.Clear();
+        if (runnable > 0 && runnable <= 12)
+        {
+            foreach (var project in _found.Where(p => p.IsRunnable && !Store.Contains(p.Path)))
+                _selected.Add(project.Path);
+        }
+    }
+
+    private void Toggle(string path, bool selected)
+    {
+        if (selected) _selected.Add(path);
+        else _selected.Remove(path);
+    }
+
+    private string Relative(string path)
+    {
+        var root = Directory.Exists(_path.Trim()) ? _path.Trim() : Path.GetDirectoryName(_path.Trim()) ?? "";
+        return root.Length > 0 && path.StartsWith(root, StringComparison.OrdinalIgnoreCase) ? Path.GetRelativePath(root, path) : path;
+    }
+
+    private void Add()
+    {
+        var entries = new List<ProjectEntry>();
+        foreach (var project in _found.Where(p => _selected.Contains(p.Path)))
+        {
+            if (Store.Contains(project.Path)) continue;
+
+            // The solutions are looked up now (the scan skips them because it is slow for many projects)
+            var full = ProjectReader.Read(project.Path);
+            entries.Add(new ProjectEntry(ProjectStore.NewId(), full.Name, full.Path, full.Solutions.FirstOrDefault(), full.DefaultProfile, [], ""));
+        }
+        Store.Add(entries);
+        MudDialog.Close(DialogResult.Ok(entries.Count));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

@@ -1,0 +1,11 @@
+{
+  "id": "loopup-dev-env",
+  "name": "LoopUp Dev Environment",
+  "version": "1.0.0",
+  "description": "Run Docker, .NET and microfrontends, follow their logs and get a LoopUp token",
+  "entry": "Seneschal.LoopupDevEnv.dll",
+  "sdk": "1.2",
+  "styles": [ "devenvironment.css", "loopup-token-generator.css" ],
+  "shares": [],
+  "uses": []
+}

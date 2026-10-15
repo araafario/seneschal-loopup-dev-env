@@ -1,0 +1,152 @@
+@using System.Globalization
+@implements IDisposable
+@inject TokenClient Client
+@inject TokenSettings Settings
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+<div class="lt-page">
+    <div class="lt-form" id="token-form">
+        <MudSelect T="string" Value="_environmentId" ValueChanged="ChangeEnvironment" Label="Environment" Variant="Variant.Outlined" Margin="Margin.Dense" id="token-env">
+            @foreach (var environment in TokenEnvironment.All)
+            {
+                <MudSelectItem T="string" Value="@environment.Id">@environment.Name</MudSelectItem>
+            }
+        </MudSelect>
+        <MudTextField T="string" @bind-Value="_email" Immediate="true" Label="Email" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Email" id="token-email" />
+        <MudTextField T="string" @bind-Value="_password" Immediate="true" Label="Password" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="InputType.Password"
+                      OnKeyDown="OnKey" id="token-password" />
+        <div class="lt-action">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="GetAsync" Disabled="_busy" id="token-get" Class="lt-get">Get Token</MudButton>
+            @if (_busy)
+            {
+                <MudProgressCircular Size="Size.Small" Indeterminate="true" Color="Color.Primary" Class="lt-spin" id="token-busy" />
+            }
+        </div>
+    </div>
+    <div class="lt-hint">@Environment.Authority</div>
+
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Dense="true" Class="mt-4" id="token-error">@_error</MudAlert>
+    }
+
+    @if (_result is not null)
+    {
+        <div class="lt-result" id="token-result">
+            <div class="lt-result-head">
+                <span class="lt-result-title">Access token</span>
+                <span class="@($"lt-expiry {(Remaining <= TimeSpan.Zero ? "lt-expired" : "")}")" id="token-expiry">@ExpiryText</span>
+                <span class="lt-spacer"></span>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="() => CopyAsync(_result.AccessToken)" id="token-copy">Copy Token</MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="() => CopyAsync(_result.AuthorizationHeader)" id="token-copy-header">Copy Header</MudButton>
+            </div>
+            <pre class="lt-token" id="token-value">@_result.AccessToken</pre>
+
+            @if (_claims.Count > 0)
+            {
+                <div class="lt-claims" id="token-claims">
+                    @foreach (var claim in _claims)
+                    {
+                        <div class="lt-claim"><span class="lt-claim-name">@claim.Key</span><span class="lt-claim-value">@claim.Value</span></div>
+                    }
+                </div>
+            }
+
+            @if (_result.RefreshToken is not null)
+            {
+                <div class="lt-result-head lt-more">
+                    <span class="lt-result-title">Refresh token</span>
+                    <span class="lt-spacer"></span>
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="() => CopyAsync(_result.RefreshToken)" id="token-copy-refresh">Copy Refresh</MudButton>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private string _environmentId = "";
+    private string _email = "";
+    private string _password = "";
+    private bool _busy;
+    private string? _error;
+    private TokenResult? _result;
+    private IReadOnlyDictionary<string, string> _claims = new Dictionary<string, string>();
+    private System.Threading.Timer? _tick;
+
+    public void Dispose() => _tick?.Dispose();
+
+    private TokenEnvironment Environment => TokenEnvironment.Find(_environmentId);
+
+    private TimeSpan Remaining => _result is null ? TimeSpan.Zero : _result.ExpiresAt - DateTimeOffset.UtcNow;
+
+    private string ExpiryText => Remaining <= TimeSpan.Zero
+        ? "Expired"
+        : Remaining.TotalMinutes >= 1 ? $"Expires in {(int)Math.Ceiling(Remaining.TotalMinutes)} min" : $"Expires in {(int)Remaining.TotalSeconds} s";
+
+    protected override void OnInitialized()
+    {
+        _environmentId = Settings.Environment;
+        _email = Settings.EmailFor(_environmentId);
+        _password = Environment.DefaultPassword;
+        _tick = new System.Threading.Timer(_ => { if (_result is not null) _ = InvokeAsync(StateHasChanged); }, null, TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(15));
+    }
+
+    private void ChangeEnvironment(string id)
+    {
+        _environmentId = id;
+        _email = Settings.EmailFor(id);
+        _password = Environment.DefaultPassword;
+        _error = null;
+        _result = null;
+    }
+
+    private async Task OnKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !_busy) await GetAsync();
+    }
+
+    private async Task GetAsync()
+    {
+        _busy = true;
+        _error = null;
+        _result = null;
+        try
+        {
+            _result = await Client.GetAsync(Environment, _email, _password);
+            _claims = Interesting(TokenClient.Claims(_result.AccessToken));
+            Settings.Remember(_environmentId, _email);
+        }
+        catch (TokenException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>The claims worth a look. The rest (hashes, session ids) is noise.</summary>
+    private static IReadOnlyDictionary<string, string> Interesting(IReadOnlyDictionary<string, string> claims)
+    {
+        string[] wanted = ["email", "first_name", "last_name", "customer_name", "customer_id", "sub", "scope", "exp"];
+        return wanted.Where(claims.ContainsKey).ToDictionary(k => k, k => k == "exp" && long.TryParse(claims[k], out var seconds)
+            ? DateTimeOffset.FromUnixTimeSeconds(seconds).ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
+            : claims[k]);
+    }
+
+    private async Task CopyAsync(string text)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            Snackbar.Add("Copied", Severity.Success);
+        }
+        catch (JSException)
+        {
+            Snackbar.Add("Could not copy", Severity.Error);
+        }
+    }
+}

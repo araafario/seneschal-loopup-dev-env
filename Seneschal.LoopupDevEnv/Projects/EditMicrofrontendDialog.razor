@@ -1,0 +1,111 @@
+@using DevEnvironment.Projects.Commands
+@inject CommandStore Store
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Edit Microfrontend</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_entry is null)
+        {
+            <MudAlert Severity="Severity.Warning">Microfrontend not found</MudAlert>
+        }
+        else
+        {
+            <MudTextField T="string" @bind-Value="_name" Label="Name" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" id="emf-name" />
+
+            <MudTextField T="string" @bind-Value="_command" Label="Command" Placeholder="npm start" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" id="emf-command"
+                          HelperText="Runs in the folder below" />
+
+            <MudSelect T="string" @bind-Value="_role" Label="Role" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" id="emf-role">
+                <MudSelectItem T="string" Value="@SingleSpaRoles.Root">Root config</MudSelectItem>
+                <MudSelectItem T="string" Value="@SingleSpaRoles.Application">Application</MudSelectItem>
+                <MudSelectItem T="string" Value="@SingleSpaRoles.Utility">Utility module</MudSelectItem>
+            </MudSelect>
+
+            <MudTextField T="string" @bind-Value="_ports" Label="Port (optional)" Placeholder="7023" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" id="emf-ports"
+                          HelperText="Used to know when it is ready" />
+
+            <MudSelect T="string" @bind-Value="_shell" Label="Shell" Variant="Variant.Outlined" Margin="Margin.Dense" Class="mb-3" id="emf-shell">
+                <MudSelectItem T="string" Value="@CommandEntry.Cmd">Command Prompt (cmd)</MudSelectItem>
+                <MudSelectItem T="string" Value="@CommandEntry.PowerShell">PowerShell</MudSelectItem>
+            </MudSelect>
+
+            <MudTextField T="string" @bind-Value="_env" Label="Environment variables (optional)" Lines="3" Variant="Variant.Outlined" Margin="Margin.Dense" id="emf-env"
+                          Placeholder="KEY=value one per line" />
+
+            <MudText Typo="Typo.caption" Class="mt-3" Style="opacity:.7">@_entry.Directory</MudText>
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2" id="emf-error">@_error</MudAlert>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="@(_entry is null)" id="emf-save">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter, EditorRequired] public string Id { get; set; } = "";
+
+    private CommandEntry? _entry;
+    private string _name = "";
+    private string _command = "";
+    private string _role = SingleSpaRoles.Application;
+    private string _ports = "";
+    private string _shell = CommandEntry.Cmd;
+    private string _env = "";
+    private string? _error;
+
+    protected override void OnInitialized()
+    {
+        _entry = Store.Get(Id);
+        if (_entry is null) return;
+
+        _name = _entry.Name;
+        _command = _entry.CommandLine;
+        _role = _entry.Role ?? SingleSpaRoles.Application;
+        _ports = string.Join(" ", _entry.Ports);
+        _shell = _entry.Shell;
+        _env = string.Join(Environment.NewLine, _entry.Env.Select(p => $"{p.Key}={p.Value}"));
+    }
+
+    private void Save()
+    {
+        if (_entry is null) return;
+        if (string.IsNullOrWhiteSpace(_name)) { _error = "Give it a name"; return; }
+        if (string.IsNullOrWhiteSpace(_command)) { _error = "Give it a command to run"; return; }
+
+        var ports = new List<int>();
+        foreach (var raw in _ports.Split([' ', ',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (!int.TryParse(raw, out var port) || port is < 1 or > 65535) { _error = $"{raw} is not a port number from 1 to 65535"; return; }
+            ports.Add(port);
+        }
+
+        var env = new Dictionary<string, string>();
+        foreach (var raw in _env.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var split = raw.IndexOf('=');
+            if (split <= 0) { _error = $"{raw} is not written as KEY=value"; return; }
+            env[raw[..split].Trim()] = raw[(split + 1)..].Trim();
+        }
+
+        Store.Update(_entry with
+        {
+            Name = _name.Trim(),
+            CommandLine = _command.Trim(),
+            Role = _role,
+            Ports = [.. ports],
+            Shell = _shell,
+            Env = env,
+        });
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

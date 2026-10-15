@@ -1,0 +1,99 @@
+@inject ProjectStore Store
+@inject ProjectCatalog Catalog
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Add Instances</MudText>
+        <MudText Typo="Typo.body2" Style="opacity:.7">@(_entry?.Name)</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_entry is null || _info is null)
+        {
+            <MudAlert Severity="Severity.Warning">Project not found</MudAlert>
+        }
+        else
+        {
+            @if (_codePorts.Count > 0)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-4" id="inst-hardcoded">
+                    <div class="alert-title">Port fixed in code</div>
+                    <div class="alert-detail">@string.Join(" ", _codePorts.Select(c => $"{c.File} line {c.Line} uses {c.Port}")). Add the PortOffset setting to it, for example <code>ListenAnyIP(5010 + builder.Configuration.GetValue("PortOffset", 0))</code></div>
+                </MudAlert>
+            }
+            else if (_baseUrls.Count == 0)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mb-4" id="inst-noport">
+                    No port in the launch profile. Give each instance its own address with --urls in Arguments
+                </MudAlert>
+            }
+
+            <div class="inst-fields">
+                <MudNumericField T="int" @bind-Value="_count" Label="Instances to add" Min="1" Max="9" Variant="Variant.Outlined" Margin="Margin.Dense" id="inst-count" />
+                <MudNumericField T="int" @bind-Value="_step" Label="Port step" Min="1" Max="5000" Variant="Variant.Outlined" Margin="Margin.Dense" id="inst-step" HideSpinButtons="true" />
+            </div>
+
+            <div class="inst-preview" id="inst-preview">
+                @for (var i = 0; i < _count; i++)
+                {
+                    var number = HighestNumber + 1 + i;
+                    var offset = HighestOffset + _step * (i + 1);
+                    <div class="inst-row">
+                        <span class="inst-name">@_entry.Name #@number</span>
+                        <span class="inst-urls">
+                            @if (_baseUrls.Count == 0)
+                            {
+                                <span class="run-url-off">No port</span>
+                            }
+                            @foreach (var url in _baseUrls)
+                            {
+                                <span class="run-url-off">@ProjectReader.ShiftUrl(url, offset)</span>
+                            }
+                        </span>
+                    </div>
+                }
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Add" Disabled="@(_entry is null || _count < 1)" id="inst-add">Add @(_count > 0 ? _count : "")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter, EditorRequired] public string Id { get; set; } = "";
+
+    private ProjectEntry? _entry;
+    private ProjectInfo? _info;
+    private IReadOnlyList<CodePort> _codePorts = [];
+    private IReadOnlyList<string> _baseUrls = [];
+    private int _count = 1;
+    private int _step = 100;
+
+    private int HighestNumber => ProjectInstances.HighestNumber(Store, _entry!);
+
+    private int HighestOffset => ProjectInstances.HighestOffset(Store, _entry!);
+
+    protected override void OnInitialized()
+    {
+        _entry = Store.Get(Id);
+        _info = _entry is null ? null : Catalog.Info(_entry.ProjectPath);
+        if (_entry is null || _info is null) return;
+
+        _codePorts = ProjectReader.CodePorts(_info.Directory);
+        _baseUrls = _info.Profile(_entry.Profile)?.Urls ?? [];
+    }
+
+    private void Add()
+    {
+        if (_entry is null) return;
+
+        var instances = ProjectInstances.Create(Store, _entry, _count, _step);
+        Store.AddAfter(_entry.Id, instances);
+        MudDialog.Close(DialogResult.Ok(instances.Count));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

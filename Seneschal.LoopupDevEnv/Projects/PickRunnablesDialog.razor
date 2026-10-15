@@ -1,0 +1,71 @@
+@using DevEnvironment.Projects.Startup
+@inject RunnableHub Hub
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Add Items</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField T="string" @bind-Value="_query" Immediate="true" Placeholder="Filter" Variant="Variant.Outlined" Margin="Margin.Dense"
+                      Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Outlined.Search" Class="mb-2" id="pick-filter" />
+        <div class="add-list add-list-tall" id="pick-list">
+            @foreach (var group in Groups)
+            {
+                var open = group.Where(r => !Taken.Contains(r.Ref)).ToList();
+                <div class="add-group-head" data-group="@group.Key">
+                    <MudCheckBox T="bool" Value="@(open.Count > 0 && open.All(r => _selected.Contains(r.Ref)))" ValueChanged="v => ToggleGroup(open, v)" Disabled="@(open.Count == 0)" Dense="true" />
+                    <span class="run-group-name">@group.Key</span>
+                    <span class="run-group-count">@group.Count()</span>
+                </div>
+                @foreach (var item in group)
+                {
+                    var taken = Taken.Contains(item.Ref);
+                    <label class="@($"add-item {(taken ? "is-added" : "")}")" data-item="@item.Ref">
+                        <MudCheckBox T="bool" Value="@(taken || _selected.Contains(item.Ref))" ValueChanged="v => Toggle(item.Ref, v)" Disabled="taken" Dense="true" />
+                        <div class="add-text">
+                            <MudText Typo="Typo.subtitle2">@item.Name @if (taken) { <span class="run-badge">added</span> }</MudText>
+                        </div>
+                    </label>
+                }
+            }
+            @if (!Groups.Any())
+            {
+                <MudText Style="opacity:.7" Class="pa-2">@(Hub.All().Count == 0 ? "Nothing to pick yet" : $"No match for \"{_query}\"")</MudText>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Add" Disabled="@(_selected.Count == 0)" id="pick-confirm">Add @(_selected.Count == 0 ? "" : _selected.Count.ToString())</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    /// <summary>Items that already belong to the startup, so one item is never started by two steps.</summary>
+    [Parameter] public HashSet<string> Taken { get; set; } = [];
+
+    private string _query = "";
+    private readonly HashSet<string> _selected = new(StringComparer.OrdinalIgnoreCase);
+
+    private IEnumerable<IGrouping<string, RunnableInfo>> Groups =>
+        Hub.All()
+            .Where(r => _query.Trim().Length == 0 || r.Name.Contains(_query.Trim(), StringComparison.OrdinalIgnoreCase))
+            .GroupBy(r => r.Kind);
+
+    private void Toggle(string reference, bool on)
+    {
+        if (on) _selected.Add(reference);
+        else _selected.Remove(reference);
+    }
+
+    private void ToggleGroup(IEnumerable<RunnableInfo> items, bool on)
+    {
+        foreach (var item in items) Toggle(item.Ref, on);
+    }
+
+    private void Add() => MudDialog.Close(DialogResult.Ok(_selected.ToList()));
+
+    private void Cancel() => MudDialog.Cancel();
+}

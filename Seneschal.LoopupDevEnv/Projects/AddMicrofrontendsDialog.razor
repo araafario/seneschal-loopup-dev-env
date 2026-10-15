@@ -1,0 +1,162 @@
+@using DevEnvironment.Projects.Commands
+@inject CommandStore Store
+@inject IDialogService Dialogs
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Add Microfrontends</MudText>
+        <MudText Typo="Typo.body2" Style="opacity:.7">Scan a folder of single-spa packages</MudText>
+    </TitleContent>
+    <DialogContent>
+        <div class="add-path">
+            <MudTextField T="string" @bind-Value="_path" Label="Folder" Placeholder="C:\path\to\your\microfrontends" Immediate="true"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="add-input" id="mf-path"
+                          OnKeyDown="OnPathKey" />
+            <MudButton Variant="Variant.Outlined" OnClick="BrowseAsync" id="mf-browse">Browse</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ScanAsync" Disabled="@(_scanning || string.IsNullOrWhiteSpace(_path))" id="mf-scan">Scan</MudButton>
+        </div>
+        @if (_scanning)
+        {
+            <MudProgressLinear Indeterminate="true" Class="my-2" id="mf-scanning" />
+        }
+        @if (_message is not null)
+        {
+            <MudText Class="my-2" Style="opacity:.8" id="mf-message">@_message</MudText>
+        }
+        @if (_found.Count > 0)
+        {
+            <div class="add-group-head">
+                <MudCheckBox T="bool" Value="AllPicked" ValueChanged="PickAll" Disabled="@(Pickable.Count == 0)" Dense="true" Label="Select all" id="mf-select-all" />
+            </div>
+        }
+        <div class="add-list add-list-tall" id="mf-list">
+            @foreach (var found in _found)
+            {
+                var added = Store.Contains(found.Directory, found.CommandLine);
+                var clash = ClashWith(found);
+                <label class="@($"add-item {(added ? "is-added" : "")}")" data-microfrontend="@found.Name">
+                    <MudCheckBox T="bool" Value="@(added || _selected.Contains(found.Directory))" ValueChanged="v => Toggle(found.Directory, v)" Disabled="added" Dense="true" />
+                    <div class="add-text">
+                        <MudText Typo="Typo.subtitle2">
+                            @found.Name
+                            <span class="@($"run-badge {(found.Role == SingleSpaRoles.Root ? "run-badge-root" : "")}")">@SingleSpaRoles.Label(found.Role)</span>
+                            <span class="run-badge">@(found.Port is { } port ? $":{port}" : "no port found")</span>
+                            @if (added) { <span class="run-badge">already added</span> }
+                            @if (clash is not null) { <span class="run-badge run-badge-bad" title="Both want the same port so only one can run at a time">port also used by @clash</span> }
+                        </MudText>
+                        <MudText Typo="Typo.caption" Style="opacity:.7">@found.CommandLine</MudText>
+                    </div>
+                </label>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Add" Disabled="@(_selected.Count == 0)" id="mf-add-confirm">Add @(_selected.Count == 0 ? "" : _selected.Count.ToString())</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private string _path = "";
+    private bool _scanning;
+    private string? _message;
+    private IReadOnlyList<MicrofrontendFound> _found = [];
+    private readonly HashSet<string> _selected = new(StringComparer.OrdinalIgnoreCase);
+
+    private List<MicrofrontendFound> Pickable => _found.Where(f => !Store.Contains(f.Directory, f.CommandLine)).ToList();
+
+    private bool AllPicked => Pickable.Count > 0 && Pickable.All(f => _selected.Contains(f.Directory));
+
+    protected override async Task OnInitializedAsync()
+    {
+        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var guess = Path.Combine(profile, "source");
+        _path = Store.LastScanPath ?? (Directory.Exists(guess) ? guess : Path.Combine(profile, "source"));
+        // The folder from last time is scanned right away, which is what you want nearly every time
+        if (Store.LastScanPath is not null && Directory.Exists(_path)) await ScanAsync();
+    }
+
+    private async Task OnPathKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await ScanAsync();
+    }
+
+    private async Task BrowseAsync()
+    {
+        var dialog = await Dialogs.ShowAsync<FolderBrowserDialog>("Choose a Folder",
+            new DialogParameters<FolderBrowserDialog> { { x => x.Start, _path } },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        var result = await dialog.Result;
+        if (result is { Canceled: false, Data: string folder })
+        {
+            _path = folder;
+            await ScanAsync();
+        }
+    }
+
+    private async Task ScanAsync()
+    {
+        var path = _path.Trim().Trim('"');
+        if (!Directory.Exists(path))
+        {
+            _message = "Folder not found";
+            _found = [];
+            return;
+        }
+
+        _scanning = true;
+        _message = null;
+        _selected.Clear();
+        StateHasChanged();
+        try
+        {
+            _found = await Task.Run(() => SingleSpaScanner.Scan(path));
+        }
+        finally
+        {
+            _scanning = false;
+        }
+
+        _message = _found.Count == 0
+            ? "No packages found"
+            : $"Found {_found.Count} package{(_found.Count == 1 ? "" : "s")}";
+    }
+
+    /// <summary>The name of another package (found now or added before) that wants the same port, or null.</summary>
+    private string? ClashWith(MicrofrontendFound found)
+    {
+        if (found.Port is not { } port) return null;
+        var other = _found.FirstOrDefault(o => !o.Directory.Equals(found.Directory, StringComparison.OrdinalIgnoreCase) && o.Port == port)?.Name
+            ?? Store.OfKind(CommandKinds.SingleSpa).FirstOrDefault(e => !e.Directory.Equals(found.Directory, StringComparison.OrdinalIgnoreCase) && e.Ports.Contains(port))?.Name;
+        return other;
+    }
+
+    private void Toggle(string directory, bool on)
+    {
+        if (on) _selected.Add(directory);
+        else _selected.Remove(directory);
+    }
+
+    private void PickAll(bool on)
+    {
+        foreach (var found in Pickable) Toggle(found.Directory, on);
+    }
+
+    private void Add()
+    {
+        var scanned = _path.Trim().Trim('"');
+        var group = Path.GetFileName(scanned.TrimEnd('\\', '/'));
+        var entries = _found
+            .Where(f => _selected.Contains(f.Directory) && !Store.Contains(f.Directory, f.CommandLine))
+            .Select(f => new CommandEntry(CommandStore.NewId(), f.Name, f.Directory, f.CommandLine, CommandEntry.Cmd, [],
+                f.Port is { } port ? [port] : [], null, group.Length > 0 ? group : null, CommandKinds.SingleSpa, f.Role))
+            .ToList();
+        Store.Add(entries);
+        Store.RememberScanPath(scanned);
+        MudDialog.Close(DialogResult.Ok(entries.Count));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

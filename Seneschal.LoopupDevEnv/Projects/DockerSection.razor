@@ -1,0 +1,267 @@
+@using DevEnvironment.Projects.Docker
+@implements IAsyncDisposable
+@inject DockerRunner Docker
+@inject DockerStore Store
+@inject IDialogService Dialogs
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+<SectionFrame Id="docker-section" Title="Docker" Summary="@Summary" Loading="@Loading">
+    <Toolbar>
+        <MudButton Variant="Variant.Outlined" OnClick="AddAsync" id="add-containers">Add Containers</MudButton>
+        @if (Store.Added.Count > 0)
+        {
+            <MudTextField T="string" @bind-Value="_query" Immediate="true" Placeholder="Filter containers" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Class="run-search" Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Outlined.Search" />
+            <div class="run-bulk">
+                <MudCheckBox T="bool" Value="AllSelected" ValueChanged="SelectAll" Dense="true" Size="Size.Small" Class="run-select-all" Label="Select all" Disabled="@(Visible.Count == 0)" id="select-all-containers" />
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Outlined.PlayArrow" Disabled="@(SelectedNames.Count == 0)" OnClick="StartSelected" id="start-selected-containers">Start @(SelectedNames.Count == 0 ? "" : SelectedNames.Count.ToString())</MudButton>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Outlined.Stop" Disabled="@(SelectedNames.Count == 0)" OnClick="StopSelected" id="stop-selected-containers">Stop</MudButton>
+            </div>
+        }
+    </Toolbar>
+    <ChildContent>
+        @if (Docker.Engine is EngineState.Down or EngineState.Missing)
+        {
+            <MudAlert Severity="@(Docker.Engine == EngineState.Down ? Severity.Warning : Severity.Error)" Dense="true" Class="run-section-alert" id="docker-down">
+                @Docker.EngineMessage
+                @if (Docker.Engine == EngineState.Down)
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Class="ml-3" OnClick="StartDesktop" id="docker-start-desktop">Start Docker Desktop</MudButton>
+                }
+            </MudAlert>
+        }
+
+        @if (Checking && Store.Added.Count > 0)
+        {
+            @* Docker has not answered yet: without this every container would flash as "not found" *@
+            <div class="run-list" id="docker-skeleton">
+                @for (var i = 0; i < Math.Min(Store.Added.Count, 5); i++)
+                {
+                    <div class="run-row run-skeleton">
+                        <span class="run-dot"></span>
+                        <div class="run-main">
+                            <MudSkeleton Width="30%" />
+                            <MudSkeleton Width="50%" Height="14px" />
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+        else if (Store.Added.Count == 0)
+        {
+            <div class="run-empty" id="no-containers">No containers yet</div>
+        }
+        else
+        {
+            <div class="run-list">
+                @foreach (var row in Visible)
+                {
+                    var c = row.Container;
+                    var busy = Docker.Busy(row.Name);
+                    <div class="@($"run-row {RowClass(c, busy)}")" data-container="@row.Name" data-sort-id="@row.Name" draggable="true" data-state="@(c?.State ?? "missing")">
+                        <span class="run-grip" title="Drag to reorder" aria-hidden="true"><MudIcon Icon="@Icons.Material.Filled.DragIndicator" Size="Size.Small" /></span>
+                        <MudCheckBox T="bool" Value="_selected.Contains(row.Name)" ValueChanged="v => Select(row.Name, v)" Dense="true" Class="run-check" />
+                        <span class="run-dot" title="@(c?.State ?? "not found")"></span>
+                        <div class="run-main">
+                            <div class="run-title">
+                                <span class="run-name" title="@row.Name">@DisplayName(row.Name, c)</span>
+                                @if (c is not null)
+                                {
+                                    <span class="run-badge">@ShortImage(c.Image)</span>
+                                    @if (c.Project is not null)
+                                    {
+                                        <span class="run-badge">@c.Project</span>
+                                    }
+                                    @if (c.Health != Health.None)
+                                    {
+                                        <span class="@($"run-badge {(c.Health == Health.Unhealthy ? "run-badge-bad" : "")}")">@HealthText(c.Health)</span>
+                                    }
+                                }
+                            </div>
+                            <div class="run-sub">
+                                @if (c is null || c.Ports.Count == 0)
+                                {
+                                    <span class="run-url-off">@(c is null ? "Removed from Docker" : "No published ports")</span>
+                                }
+                                else
+                                {
+                                    @foreach (var port in c.Ports)
+                                    {
+                                        if (c.Ready)
+                                        {
+                                            <a href="@($"http://localhost:{port}")" target="_blank" rel="noopener" class="run-url">localhost:@port</a>
+                                        }
+                                        else
+                                        {
+                                            <span class="run-url-off">localhost:@port</span>
+                                        }
+                                    }
+                                }
+                            </div>
+                        </div>
+                        <div class="run-state"><span class="run-state-text">@(busy is not null ? busy : c?.Status ?? "Missing")</span></div>
+                        <div class="run-actions">
+                            @if (c is { Running: true })
+                            {
+                                <MudTooltip Text="Stop"><MudIconButton Icon="@Icons.Material.Filled.Stop" Class="sq-btn run-act-stop" Color="Color.Inherit" Disabled="@(busy is not null)" OnClick="() => Act(Docker.StopAsync(row.Name))" /></MudTooltip>
+                                <MudTooltip Text="Restart"><MudIconButton Icon="@Icons.Material.Outlined.Refresh" Class="sq-btn run-act-restart" Color="Color.Inherit" Disabled="@(busy is not null)" OnClick="() => Act(Docker.RestartAsync(row.Name))" /></MudTooltip>
+                            }
+                            else
+                            {
+                                <MudTooltip Text="Start"><MudIconButton Icon="@Icons.Material.Filled.PlayArrow" Class="sq-btn run-act-start" Color="Color.Inherit" Disabled="@(c is null || busy is not null)" OnClick="() => Act(Docker.StartAsync(row.Name))" /></MudTooltip>
+                            }
+                            <MudTooltip Text="Show logs"><MudIconButton Icon="@Icons.Material.Outlined.Terminal" Class="sq-btn run-act-logs" Color="Color.Inherit" Disabled="@(c is null)" OnClick="() => ShowLogs(row.Name)" /></MudTooltip>
+                            <MudMenu Icon="@Icons.Material.Outlined.MoreVert" Class="sq-btn run-act-more" AriaLabel="More actions" Dense="true">
+                                <MudMenuItem OnClick="() => RemoveAsync(row)">Remove</MudMenuItem>
+                            </MudMenu>
+                        </div>
+                    </div>
+                }
+                @if (Visible.Count == 0)
+                {
+                    <div class="run-empty">No match for "@_query"</div>
+                }
+            </div>
+        }
+    </ChildContent>
+</SectionFrame>
+
+@code {
+    private sealed record Row(string Name, ContainerInfo? Container);
+
+    private string _query = "";
+    private readonly HashSet<string> _selected = new(StringComparer.OrdinalIgnoreCase);
+
+    private List<Row> Visible =>
+        Store.Added
+            .Select(n => new Row(n, Docker.Get(n)))
+            .Where(Matches)
+            .ToList();
+
+    private List<string> SelectedNames => Store.Added.Where(_selected.Contains).ToList();
+
+    private bool AllSelected => Visible.Count > 0 && Visible.All(r => _selected.Contains(r.Name));
+
+    /// <summary>The first answer from Docker is still to come.</summary>
+    private bool Checking => Docker.Engine == EngineState.Unknown;
+
+    /// <summary>The bar shows for the first check and while a start, stop or restart is running, never for the regular refresh.</summary>
+    private bool Loading => Checking || Store.Added.Any(n => Docker.Busy(n) is not null);
+
+    private string? Summary
+    {
+        get
+        {
+            if (Store.Added.Count == 0) return null;
+            var running = Store.Added.Count(n => Docker.Get(n) is { Running: true });
+            return $"{running} of {Store.Added.Count} running";
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        Docker.Changed += OnChanged;
+        Store.Changed += OnChanged;
+    }
+
+    private SortableList? _sortable;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // The rows can be dragged into a new order, which is saved
+        if (firstRender) _sortable = await SortableList.CreateAsync(JS, "docker-section", Store.Move);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Docker.Changed -= OnChanged;
+        Store.Changed -= OnChanged;
+        if (_sortable is not null) await _sortable.DisposeAsync();
+    }
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private bool Matches(Row r)
+    {
+        var q = _query.Trim();
+        return q.Length == 0
+            || r.Name.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || (r.Container?.Image.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (r.Container?.Project?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (r.Container?.Service?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
+    private void Select(string name, bool on)
+    {
+        if (on) _selected.Add(name);
+        else _selected.Remove(name);
+    }
+
+    private void SelectAll(bool on)
+    {
+        foreach (var row in Visible) Select(row.Name, on);
+    }
+
+    /// <summary>The compose service name when the container is named "project-service-1", which is what people think of it as.</summary>
+    private static string DisplayName(string name, ContainerInfo? c) =>
+        c?.Project is not null && c.Service is not null && name.StartsWith(c.Project + "-" + c.Service + "-", StringComparison.OrdinalIgnoreCase)
+            ? c.Service
+            : name;
+
+    private static string ShortImage(string image)
+    {
+        var name = image[(image.LastIndexOf('/') + 1)..];
+        return name.Length > 0 ? name : image;
+    }
+
+    private static string HealthText(Health health) => health switch
+    {
+        Health.Healthy => "healthy",
+        Health.Unhealthy => "unhealthy",
+        _ => "health starting",
+    };
+
+    private static string RowClass(ContainerInfo? c, string? busy) => c?.RunClass(busy) ?? "run-exited";
+
+    private async void Act(Task<RunResult> operation) => Report(await operation);
+
+    private void Report(RunResult result)
+    {
+        if (!result.Ok) ErrorReport.Toast(Snackbar, Dialogs, result.Message);
+    }
+
+    private async Task Many(IEnumerable<string> names, Func<string, Task<RunResult>> action)
+    {
+        var results = await Task.WhenAll(names.Select(action).ToList());
+        foreach (var failed in results.Where(r => !r.Ok).Take(3)) Report(failed);
+    }
+
+    private Task StartSelected() => Many(SelectedNames.Where(n => Docker.Get(n) is { Running: false }), Docker.StartAsync);
+
+    private Task StopSelected() => Many(SelectedNames.Where(n => Docker.Get(n) is { Running: true }), Docker.StopAsync);
+
+    /// <summary>One big log window for this container alone. It never touches the Logs tool's layout or panes.</summary>
+    private Task ShowLogs(string name) =>
+        Dialogs.ShowAsync<ProcessLogDialog>(name, new DialogParameters<ProcessLogDialog> { { x => x.SourceId, $"docker:{name}" } },
+            new DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true, CloseButton = true, CloseOnEscapeKey = true });
+
+    private void StartDesktop() => Report(Docker.StartDockerDesktop());
+
+    private Task AddAsync() =>
+        Dialogs.ShowAsync<AddContainersDialog>("Add Containers", new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true });
+
+    private async Task RemoveAsync(Row row)
+    {
+        var running = row.Container is { Running: true };
+        var confirmed = await Dialogs.ShowMessageBoxAsync("Remove from List",
+            running
+                ? $"Remove {row.Name}? It keeps running in Docker"
+                : $"Remove {row.Name} from the list?",
+            yesText: "Remove", cancelText: "Cancel");
+        if (confirmed != true) return;
+
+        _selected.Remove(row.Name);
+        Store.Remove(row.Name);
+    }
+}
